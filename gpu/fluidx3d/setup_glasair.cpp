@@ -137,6 +137,11 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	// Frame bookkeeping: the wing mesh is bbox-centered at lbm.center(),
 	// parked 0.15*Ny upstream, and pitched -aoa about the span axis; cells
 	// are tested in the un-pitched wing frame (chord +y, up +z, span +x).
+	// Anti-vanish floor for ALL stamped plates, in half-width cells:
+	// 0.75 (default) guarantees plates survive coarse lattices but fuses
+	// close pairs into a fence; drop toward 0.4-0.5 on fine lattices
+	// (vram >= 12000) for visually crisp, distinct vanes.
+	const float vg_floor = cfgf(cfg, "vg_floor_cells", 0.75f);
 	const bool vg_on   = cfgf(cfg, "vg_enable", 0.0f)!=0.0f;
 	const float vg_h   = cfgf(cfg, "vg_h_mm", 10.0f)/1000.0f/si_chord*lbm_chord;   // vane height, lattice units
 	const float vg_p   = cfgf(cfg, "vg_pitch_mm", 50.0f)/1000.0f/si_chord*lbm_chord;
@@ -200,7 +205,34 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	const float rd_k0    = cfgf(cfg, "vg_rud_skin0_mm", 50.1f)*k_mm;     // fin half-thickness at the row, band bottom
 	const float rd_k1    = cfgf(cfg, "vg_rud_skin1_mm", 33.0f)*k_mm;     // ... band top
 	const float rd_ahead = cfgf(cfg, "vg_rud_ahead_mm", 100.0f)*k_mm/cos(rd_rake); // perpendicular -> chordwise
-	std::atomic<uint> ev_cells(0u), rd_cells(0u);                // stamped-cell audit, printed below
+	// vg_junc_*: the fin/stab JUNCTION cluster (owner concepts, see
+	// results/concept.jpg + concept2.jpg): a short row of alternating-
+	// incidence vanes on EACH side of the tail cone, aimed at the corner
+	// vortex that washes over the lower rudder at low airspeed. Two
+	// candidate seatings, selectable with vg_junc_loc:
+	//   1 = SLAB DIAGONAL (concept.jpg): row wraps down-aft across the
+	//       tail-cone slab between the fin-LE blend and the stab root.
+	//   2 = HINGE HUGGER (concept2.jpg): vertical stack on the stern post
+	//       directly ahead of the LOWER rudder hinge, raked with it; vane
+	//       TEs stop one vane-length+15 mm short of the open gap.
+	// Anchor = TOP vane seat (origin frame, mm); the row marches down-aft
+	// at vg_junc_lean_deg from vertical. Explicit keys override the
+	// per-location defaults chosen below.
+	const bool jc_on     = cfgf(cfg, "vg_junc_enable", 0.0f)!=0.0f;
+	const int  jc_loc    = (int)cfgf(cfg, "vg_junc_loc", 1.0f);          // 1 = slab, 2 = hinge hugger
+	const bool jc2       = jc_loc==2;
+	const int  jc_n      = 2*(int)cfgf(cfg, "vg_junc_pairs", 2.0f);      // vanes per side
+	const float jc_h     = cfgf(cfg, "vg_junc_h_mm", 12.0f)*k_mm;
+	const float jc_p     = cfgf(cfg, "vg_junc_pitch_mm", jc2 ? 45.0f : 55.0f)*k_mm; // seat spacing along the row
+	const float jc_t     = cfgf(cfg, "vg_junc_t_mm", 1.5f)*k_mm;
+	const float jc_l     = cfgf(cfg, "vg_junc_l_per_h", 3.0f)*jc_h;
+	const float jc_b     = radians(cfgf(cfg, "vg_junc_beta_deg", 15.0f));
+	const float jc_x0    = cfgf(cfg, "vg_junc_x0_mm", jc2 ? 216.0f : -330.0f)*k_mm;  // top seat, chordwise vs stab hinge
+	const float jc_z0    = cfgf(cfg, "vg_junc_z0_mm", jc2 ? 150.0f : 195.0f)*k_mm;   // top seat, above stab waterline
+	const float jc_lean  = radians(cfgf(cfg, "vg_junc_lean_deg", jc2 ? 22.125f : 68.0f)); // row lean aft-of-vertical
+	const float jc_k0    = cfgf(cfg, "vg_junc_skin0_mm", jc2 ? 46.0f : 37.0f)*k_mm;  // flank half-width at the top seat
+	const float jc_k1    = cfgf(cfg, "vg_junc_skin1_mm", jc2 ? 39.0f : 40.0f)*k_mm;  // ... at the bottom seat
+	std::atomic<uint> ev_cells(0u), rd_cells(0u), jc_cells(0u);  // stamped-cell audit, printed below
 	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz(); parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
 		if(speck_on&&lbm.flags[n]==0u) {                         // stamp the mid-span speck
 			const float dx=(float)x-wc.x, dy=(float)y-wc.y, dz=(float)z-wc.z;
@@ -229,7 +261,7 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 						const float across = du*cos(vg_b)-dyv*sin(sgn*vg_b);
 						// Same one-cell floor as the speck: physical 1.5 mm
 						// plates must still exist on a coarse visual lattice.
-						if(along>=0.0f&&along<=vg_l&&fabs(across)<=fmax(0.5f*vg_t, 0.75f)) { lbm.flags[n] = TYPE_S|TYPE_X; break; }
+						if(along>=0.0f&&along<=vg_l&&fabs(across)<=fmax(0.5f*vg_t, vg_floor)) { lbm.flags[n] = TYPE_S|TYPE_X; break; }
 					}
 				}
 			}
@@ -253,7 +285,7 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 							const float du = ul-(side==0 ? 0.25f : 0.75f)*ev_p;
 							const float along  = du*sin(sgn*ev_b)+dyv*cos(ev_b);
 							const float across = du*cos(ev_b)-dyv*sin(sgn*ev_b);
-							if(along>=0.0f&&along<=ev_l&&fabs(across)<=fmax(0.5f*ev_t, 0.75f)) { lbm.flags[n] = TYPE_S|TYPE_X; ev_cells++; break; }
+							if(along>=0.0f&&along<=ev_l&&fabs(across)<=fmax(0.5f*ev_t, vg_floor)) { lbm.flags[n] = TYPE_S|TYPE_X; ev_cells++; break; }
 						}
 					}
 				}
@@ -280,9 +312,32 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 							const float du = ul-(side==0 ? 0.25f : 0.75f)*rd_p;
 							const float along  = du*sin(sgn*rd_b)+dyv*cos(rd_b);
 							const float across = du*cos(rd_b)-dyv*sin(sgn*rd_b);
-							if(along>=0.0f&&along<=rd_l&&fabs(across)<=fmax(0.5f*rd_t, 0.75f)) { lbm.flags[n] = TYPE_S|TYPE_X; rd_cells++; break; }
+							if(along>=0.0f&&along<=rd_l&&fabs(across)<=fmax(0.5f*rd_t, vg_floor)) { lbm.flags[n] = TYPE_S|TYPE_X; rd_cells++; break; }
 						}
 					}
+				}
+			}
+		}
+		if(jc_on&&lbm.flags[n]==0u) {                            // stamp the junction cluster (both sides)
+			const float dx=(float)x-wc.x, dy=(float)y-wc.y, dz=(float)z-wc.z;
+			const float yw =  dy*cos(ar)+dz*sin(ar);
+			const float zw = -dy*sin(ar)+dz*cos(ar);
+			const float yo = yw-to_x, zo = zw-to_z;              // origin (stab hinge / WL) frame
+			// Discrete seats along the row line; each vane is a flow-aligned
+			// plate standing laterally off the flank, incidence alternating
+			// so consecutive vanes form counter-rotating pairs.
+			for(int kv=0; kv<jc_n; kv++) {
+				const float sx = jc_x0+sin(jc_lean)*jc_p*(float)kv;  // seat (vane LE), marching down-aft
+				const float sz = jc_z0-cos(jc_lean)*jc_p*(float)kv;
+				const float dyv = yo-sx, dzv = zo-sz;
+				const float sgn = (kv%2==0) ? 1.0f : -1.0f;          // alternate toe angle
+				const float along  =  dyv*cos(jc_b)+dzv*sin(sgn*jc_b);
+				const float across = -dyv*sin(sgn*jc_b)+dzv*cos(jc_b);
+				if(along>=0.0f&&along<=jc_l&&fabs(across)<=fmax(0.5f*jc_t, vg_floor)) {
+					// Flank half-width lerped top seat -> bottom seat.
+					const float fr = (float)kv/fmax((float)(jc_n-1), 1.0f);
+					const float skin = jc_k0+(jc_k1-jc_k0)*fr;
+					if(fabs(dx)>skin-1.5f&&fabs(dx)<skin+jc_h) { lbm.flags[n] = TYPE_S|TYPE_X; jc_cells++; break; }
 				}
 			}
 		}
@@ -295,6 +350,7 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	// than silently simming a clean tail.
 	if(ev_on) print_info("tail VG: elevator row stamped "+to_string((uint)ev_cells)+" cells (h="+to_string(ev_h, 1u)+" cells)");
 	if(rd_on) print_info("tail VG: rudder rows stamped "+to_string((uint)rd_cells)+" cells (h="+to_string(rd_h, 1u)+" cells)");
+	if(jc_on) print_info("tail VG: junction cluster loc "+to_string(jc_loc)+" stamped "+to_string((uint)jc_cells)+" cells ("+to_string(jc_n)+" vanes/side)");
 	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE|VIS_Q_CRITERION;
 	// Startup camera framing (owner request): 2x zoom, 35 deg elevation looking
 	// down onto the wing's upper surface. All four knobs live in the config;

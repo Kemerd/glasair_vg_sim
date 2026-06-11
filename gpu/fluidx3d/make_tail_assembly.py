@@ -118,7 +118,11 @@ FUSE_HW_MIN = 1.55               # stern-post half-width floor: covers the
                                  # rudder root thickness, clears the 1.658 in
                                  # elevator root rib by ~2.7 mm
 FUSE_NOSE_X = 180.0              # stinger nose shoulder station
-FUSE_NOSE_LEN = 18.0             # ellipsoidal nose cap length
+FUSE_NOSE_LEN = 18.0             # ellipsoidal nose cap length. A smooth
+                                 # closed nose is the standard forebody for
+                                 # an empennage-only article -- a flat front
+                                 # cut would be a bluff face (separation
+                                 # bubble + shedding washing over the tail).
 FIN_ROOT_WL = 66.277             # fin root rib waterline (fuselage top aft)
 DORSAL_X0 = 192.657              # dorsal arc forward tangency station
 
@@ -425,18 +429,40 @@ def loft_fin(n_st: int = 121) -> trimesh.Trimesh:
     return loft(rings)
 
 
+# Sideview turtledeck ridge line: runs from the canopy fairing AFT and ends
+# EXACTLY on the fin LE line at (209.41, 68.544) [DXF entity check] -- the
+# drawing itself merges the deck into the fin, which is why the fuselage top
+# is modeled as a narrowing ridge rather than a round ellipse crown.
+SPINE_P0 = (172.480, 65.066)
+SPINE_SLOPE = (68.544 - 65.066) / (209.410 - 172.480)    # 0.09418
+
+
+def fin_root_half_thickness(x: float) -> float:
+    """Half-thickness of the NACA 0010 fin-root section at station x (in).
+
+    Zero outside the root chord footprint; this is what the fuselage ridge
+    width tracks under the fin so deck and fin read as ONE surface.
+    """
+    frac = (x - FIN_LE[0][0]) / FIN_ROOT_CHORD
+    if frac <= 0.0 or frac >= 1.0:
+        return 0.0
+    return float(naca0010_half(frac)) * FIN_ROOT_CHORD
+
+
 def loft_fuselage(n_st: int = 90, n_ring: int = 64) -> trimesh.Trimesh:
-    """Aft-fuselage stinger: elliptical sections between the sideview top
-    (turtledeck -> dorsal arc -> flat under-fin deck) and bottom (upsweep)
-    profiles, half-width from the topview side lines with a stern-post
-    floor. Ellipsoidal nose cap forward so the tunnel sees a closed body."""
+    """Aft-fuselage stinger lofted from TEARDROP sections: a full-beam lower
+    lobe (topview side lines, stern-post floor) blending into a narrow top
+    ridge that follows the sideview spine line straight into the fin LE,
+    with ridge width tracking the local fin thickness. This makes deck and
+    fin one continuous body instead of a fin plate stuck on a round hull.
+    Ellipsoidal nose cap forward so the tunnel sees a closed body."""
     def y_top(x: float) -> float:
-        if x <= DORSAL_X0:
-            return 62.25
-        if x <= FIN_LE[0][0]:
-            (cx, cy), r, _, _ = FIN_DORSAL_ARC
-            return cy - math.sqrt(max(r * r - (x - cx) ** 2, 0.0))
-        return FIN_ROOT_WL
+        # Spine line to its fin-LE intersection, then ride the fin LE up a
+        # little so the union with the fin solid overlaps generously; the
+        # cap keeps the fuselage from ballooning into a second fin.
+        if x <= 209.410:
+            return SPINE_P0[1] + SPINE_SLOPE * (x - SPINE_P0[0])
+        return min(FIN_LE[0][1] + (x - FIN_LE[0][0]) / 1.19399, 70.0)
 
     def y_bot(x: float) -> float:
         return UPSWEEP_P[1] + UPSWEEP_SLOPE * (x - UPSWEEP_P[0])
@@ -445,22 +471,43 @@ def loft_fuselage(n_st: int = 90, n_ring: int = 64) -> trimesh.Trimesh:
         x0, w0, x1, w1 = FUSE_SIDE
         return max(FUSE_HW_MIN, w0 + (w1 - w0) * (x - x0) / (x1 - x0))
 
+    def w_ridge(x: float, beam: float) -> float:
+        # Under the fin: 0.97x the fin's local half-thickness (fin stays a
+        # hair proud, so the seam reads as the fin emerging from the deck).
+        # Forward: the deck crown narrows smoothly from near-round at the
+        # nose cut toward the fin-LE thickness, canopy-fairing style.
+        fwd = beam * (0.72 - 0.50 * min(max((x - 162.0) / 44.7, 0.0), 1.0))
+        return max(0.97 * fin_root_half_thickness(x), fwd, 0.30)
+
     xs = np.linspace(FUSE_NOSE_X - FUSE_NOSE_LEN + 0.15, 248.0, n_st)
-    th = np.linspace(0.0, 2.0 * math.pi, n_ring, endpoint=False)
+    phi = np.linspace(0.0, 2.0 * math.pi, n_ring, endpoint=False)
+    v = -np.cos(phi)                                 # -1 bottom pole, +1 apex
+    v_m = -0.10                                      # widest beam waterline
     rings = []
     for x in xs:
         xc = max(x, FUSE_NOSE_X)                     # profiles frozen on the cap
-        cy = 0.5 * (y_top(xc) + y_bot(xc))
-        ry = 0.5 * (y_top(xc) - y_bot(xc))
-        rz = hw(xc)
+        yb, yt = y_bot(xc), y_top(xc)
+        beam = hw(xc)
+        ridge = min(w_ridge(xc, beam), beam)
+        s = 1.0
         if x < FUSE_NOSE_X:                          # ellipsoidal nose shrink
             s = math.sqrt(max(1.0 - ((FUSE_NOSE_X - x) / FUSE_NOSE_LEN) ** 2,
                               1.0e-4))
-            ry *= s
-            rz *= s
+        # Width profile: elliptical from the bottom pole up to the widest
+        # waterline, then a cosine blend that lands on the ridge width; the
+        # sin(phi) ring closure rounds the ridge over the apex.
+        w = np.where(
+            v <= v_m,
+            beam * np.sqrt(np.clip(1.0 - ((v - v_m) / (1.0 + v_m)) ** 2,
+                                   0.0, 1.0)),
+            ridge + (beam - ridge)
+            * np.cos(0.5 * math.pi * (v - v_m) / (1.0 - v_m)) ** 1.35,
+        )
+        y = yb + (v + 1.0) / 2.0 * (yt - yb)
+        cy = 0.5 * (yt + yb)
         rings.append(np.column_stack([np.full(n_ring, x),
-                                      cy + ry * np.sin(th),
-                                      rz * np.cos(th)]))
+                                      cy + (y - cy) * s,
+                                      w * np.sin(phi) * s]))
     return loft(rings)
 
 
@@ -703,6 +750,20 @@ def build_assembly(elev_deg: float, rud_deg: float, tag: str,
 #  CLI
 # =============================================================================
 
+def single_tag(elev_deg: float, rud_deg: float) -> str:
+    """Canonical asset tag for one clean article at signed deflections.
+
+    Shared naming contract with the GUI launcher (tunnel_gui.py predicts the
+    file name to decide whether it must generate before launching):
+    en/eu15/ed15 for the elevator (u = TE up = nose-up command), rn/rd15 for
+    the rudder; magnitudes formatted %g so 15.0 -> '15'.
+    """
+    e = "en" if elev_deg == 0 else (f"eu{-elev_deg:g}" if elev_deg < 0
+                                    else f"ed{elev_deg:g}")
+    r = "rn" if rud_deg == 0 else f"rd{abs(rud_deg):g}"
+    return f"tail_asm_clean_{e}_{r}"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="full empennage assembly articles")
     ap.add_argument("--elev-deg", type=float, default=15.0)
@@ -716,11 +777,23 @@ def main() -> None:
     ap.add_argument("--no-render", action="store_true")
     ap.add_argument("--only", type=str, default="",
                     help="build just the article whose tag contains this text")
+    ap.add_argument("--single", nargs=2, type=float, metavar=("ELEV", "RUD"),
+                    default=None,
+                    help="build exactly ONE clean article at these signed "
+                         "deflections (deg; elevator + = TE down, rudder "
+                         "+ = TE toward +z) -- the GUI launcher's on-demand "
+                         "path; VG rows come from analytic tunnel stamping, "
+                         "not the STL, so no VG variant is baked here")
     a = ap.parse_args()
     ASSETS.mkdir(parents=True, exist_ok=True)
 
     print("[tail_assembly] NOTE: tail sections are the NACA 0010 placeholder "
           "(aircraft.yaml TODO); planforms/hinges are drawing-true [DXF].")
+
+    if a.single is not None:
+        de, dr = a.single
+        build_assembly(de, dr, single_tag(de, dr))
+        return
 
     e, r = a.elev_deg, a.rud_deg
     cases = [

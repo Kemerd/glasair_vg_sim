@@ -161,6 +161,20 @@ class TunnelGUI:
         self.row_vg_rud = ttk.Checkbutton(
             v, text="Rudder rows — both fin sides (analog, no flight-test source)",
             variable=self.vg_rud, style="Card.TCheckbutton")
+        # Junction cluster: the owner-sketched corner experiment (see
+        # results/concept.jpg and concept2.jpg) with two candidate seatings.
+        self.vg_junc = tk.BooleanVar(value=False)
+        self.junc_loc = tk.StringVar(value="Slab diagonal (concept 1)")
+        self.row_vg_junc = ttk.Frame(v, style="Card.TFrame")
+        ttk.Checkbutton(self.row_vg_junc,
+                        text="Junction cluster — fin/stab corner, 2 pairs/side at",
+                        variable=self.vg_junc, style="Card.TCheckbutton"
+                        ).pack(side="left")
+        ttk.Combobox(self.row_vg_junc, textvariable=self.junc_loc, width=26,
+                     state="readonly",
+                     values=("Slab diagonal (concept 1)",
+                             "Hinge hugger (concept 2)")
+                     ).pack(side="left", padx=(6, 0))
         nums = ttk.Frame(v, style="Card.TFrame")
         self.vg_h = tk.StringVar(value="10")
         self.vg_p = tk.StringVar(value="30")
@@ -186,7 +200,7 @@ class TunnelGUI:
         f = self._card(self.root, "Flow")
         self.mph = tk.StringVar(value="70")
         self.aoa = tk.StringVar(value="8")
-        self.vram = tk.StringVar(value="6000")
+        self.vram = tk.StringVar(value="12000")
         self.u_lat = tk.StringVar(value="0.10")
         self.autorot = tk.BooleanVar(value=True)
         for label, var, w in (("Airspeed mph", self.mph, 6),
@@ -229,9 +243,11 @@ class TunnelGUI:
         for r in self.vg_rows:
             r.pack_forget()
         self.vg_nums.pack_forget()
+        self.row_vg_junc.pack_forget()
         if tail:
             self.row_vg_elev.pack(anchor="w")
             self.row_vg_rud.pack(anchor="w")
+            self.row_vg_junc.pack(anchor="w")
             # 1.5 mm physical plates: the lattice stamper enforces a one-cell
             # minimum footprint, so thin plates stay visible on coarse runs.
             if self.vg_t.get() == "6":
@@ -296,6 +312,9 @@ class TunnelGUI:
             f"autorotate  = {1 if self.autorot.get() else 0}",
             "t_end_steps = 0",
             f"csv         = {(RESULTS / 'forces_live.csv').as_posix()}",
+            # Anti-vanish floor for stamped vanes: crisp plates on fine
+            # lattices, fused-but-visible plates on coarse ones.
+            f"vg_floor_cells = {0.5 if float(self.vram.get()) >= 10000 else 0.75}",
         ]
         if g == "tail":
             # True span + the STL-origin -> bbox-center anchors the analytic
@@ -320,6 +339,9 @@ class TunnelGUI:
                 f"vg_rud_pitch_mm  = {fmt(float(self.vg_p.get()))}",
                 f"vg_elev_t_mm     = {fmt(float(self.vg_t.get()))}",
                 f"vg_rud_t_mm      = {fmt(float(self.vg_t.get()))}",
+                f"vg_junc_enable = {1 if self.vg_junc.get() else 0}",
+                f"vg_junc_loc    = {2 if 'concept 2' in self.junc_loc.get() else 1}",
+                f"vg_junc_t_mm   = {fmt(float(self.vg_t.get()))}",
             ]
         else:
             lines += [
@@ -373,6 +395,10 @@ class TunnelGUI:
                 vg_bits.append("elevator VG")
             if self.vg_rud.get():
                 vg_bits.append("rudder VG")
+            if self.vg_junc.get():
+                vg_bits.append("junction VG "
+                               + ("loc2" if "concept 2" in self.junc_loc.get()
+                                  else "loc1"))
         elif self.vg_wing.get():
             vg_bits.append("wing VG")
         self.status.config(text=f"Launched: {stl.name}"
