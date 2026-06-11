@@ -1,7 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
-|  controlDict -- Phase-1 clean-section 2D validation case                    |
-|  Instantiated from cases/validation_2d/template by                          |
-|  scripts/build_validation_case.py                                           |
+|  controlDict -- pimpleFoam pseudo-transient VARIANT (post-stall fallback)   |
+|  Lives in pimple_overrides/; copied over system/controlDict by              |
+|  scripts/run_validation.py when a post-stall case refuses to converge      |
+|  steady. Identical to the base dictionary except where commented.           |
 \*---------------------------------------------------------------------------*/
 FoamFile
 {
@@ -12,23 +13,23 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-// Steady SIMPLE solve. Post-stall AoA points that refuse to converge fall
-// back to pimpleFoam pseudo-transient (local Euler time stepping); the exact
-// dictionary deltas for that switch are documented in this case's README.md
-// so the fallback is a recorded, reproducible change -- never a hand edit
-// that drifts from the template (spec section 4 reproducibility rule).
+// Pseudo-transient fallback: pimpleFoam with localEuler time stepping (the
+// ddt swap lives in the sibling fvSchemes override). Post-stall the steady
+// SIMPLE iteration fights the shedding the physics wants; local pseudo-time
+// marching lets each cell relax at its own stable rate toward the (mean)
+// solution instead. The gate report flags these points as pseudo-transient
+// (validation/compare_gate.py reads 'application' from this file).
 
-application     simpleFoam;
+application     pimpleFoam;                 // VARIANT: was simpleFoam
 
 startFrom       latestTime;
 startTime       0;
 
 stopAt          endTime;
 
-// Iteration budget: transition cases converge slower than fully-turbulent
-// SST because the intermittency field has to settle; 6000 outer iterations
-// is headroom -- fvSolution residualControl stops the run early once every
-// residual is below the spec gate (1e-5) with margin.
+// Under localEuler the global time index is just an outer-iteration
+// counter, so deltaT 1 / endTime 6000 keep the meaning they had in the
+// steady run: an iteration budget, not physical seconds.
 endTime         6000;
 
 deltaT          1;
@@ -52,20 +53,15 @@ runTimeModifiable true;
 
 functions
 {
-    // Lift/drag/moment coefficients with AoA-rotated direction vectors.
+    // Same function-object set as the steady run -- the post-processing
+    // chain (forces, residuals, y+, BL profiles, wall Cf) must not change
+    // across the solver swap or the gate inputs would stop being
+    // comparable.
     #include "forceCoeffs"
-
-    // Per-iteration initial-residual history (the spec convergence gate
-    // audits residuals < 1e-5 AND flat forces from these files).
     #include "residuals"
-
-    // Wall y+ verification: spec section 4 fails any case with max y+ > 2
-    // over more than 1% of wall faces; this writes the evidence.
     #include "yPlusObj"
-
-    // Wall-normal boundary-layer profile lines on the suction surface
-    // (Phase-1 item 5: the delta/delta* table that sizes the VGs).
     #include "sampling"
+    #include "wallShearStressObj"
 }
 
 // ************************************************************************* //

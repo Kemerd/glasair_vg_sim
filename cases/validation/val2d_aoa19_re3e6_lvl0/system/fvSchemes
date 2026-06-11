@@ -1,7 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
-|  fvSchemes -- Phase-1 clean-section 2D validation case                      |
-|  Instantiated from cases/validation_2d/template by                          |
-|  scripts/build_validation_case.py                                           |
+|  fvSchemes -- pimpleFoam pseudo-transient VARIANT (post-stall fallback)     |
+|  Lives in pimple_overrides/; copied over system/fvSchemes by                |
+|  scripts/run_validation.py when a post-stall case refuses to converge      |
+|  steady. Identical to the base dictionary except where commented.           |
 \*---------------------------------------------------------------------------*/
 FoamFile
 {
@@ -14,17 +15,26 @@ FoamFile
 
 ddtSchemes
 {
-    // Steady SIMPLE. (pimpleFoam fallback swaps this single entry for
-    // localEuler -- see the case README for the full delta set.)
-    default         steadyState;
+    // VARIANT (the single scheme change of the fallback): local pseudo-time
+    // Euler stepping instead of steadyState. Every cell marches at its own
+    // stable pseudo time step (rDeltaT controls in the fvSolution PIMPLE
+    // block), which damps the post-stall shedding modes a global steady
+    // iteration cannot.
+    default         localEuler;
 }
 
 gradSchemes
 {
-    // cellLimited keeps reconstruction monotone in the few skewed cells the
-    // transfinite C-blocks produce around the nose, without degrading the
-    // second-order behaviour over the (near-orthogonal) BL region.
-    default         cellLimited Gauss linear 1;
+    // Default gradient is UNLIMITED Gauss linear: the transition-model
+    // scalars (gammaInt/ReThetat, plus k/omega feeding their correlations)
+    // keep full second-order gradients where the transition front lives --
+    // a blanket cellLimited default was found to be needless dissipation on
+    // exactly the fields this phase is validated on. grad(U) alone stays
+    // cellLimited: it feeds linearUpwind reconstruction and the production
+    // terms, and the few skewed cells the transfinite C-blocks produce
+    // around the nose are where velocity-gradient ringing actually starts.
+    // (Mirrors the base dictionary; the variant changes ddtSchemes only.)
+    default         Gauss linear;
     grad(U)         cellLimited Gauss linear 1;
 }
 
