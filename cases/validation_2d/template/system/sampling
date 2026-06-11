@@ -1,0 +1,40 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Boundary-layer sample lines -- Phase-1 clean-section 2D validation case    |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+
+// Wall-normal profile lines on the SUCTION surface at the Phase-1 stations
+// x/c = 0.05 0.07 0.10 0.15 0.20 0.30 0.40 0.50 0.60 0.70 0.80 0.90.
+// Each line starts a hair off the wall (so the first sample lands inside
+// the first cell, not on the boundary face) and runs 0.15 c along the LOCAL
+// surface normal -- comfortably past delta even at high AoA. The builder
+// computes the anchor points and normals from the same resampled LS(1)-0413
+// loop the mesh was built from, so the lines track the actual surface.
+// Downstream, the BL-extraction utility integrates these profiles into the
+// delta / delta* table that sizes the VGs (spec Phase-1 item 5).
+
+blProfiles
+{
+    type            sets;
+    libs            (sampling);
+
+    // Sample once, from the CONVERGED solution: profiles from a half-
+    // converged state would poison the VG-sizing table.
+    writeControl    onEnd;
+
+    interpolationScheme cellPoint;
+
+    // raw = plain numeric columns; trivially parsed by the Phase-1
+    // BL-extraction script with numpy.loadtxt.
+    setFormat       raw;
+
+    fields          (U p k omega nut gammaInt ReThetat);
+
+    sets
+    (
+@SAMPLING_SETS@
+    );
+}
+
+// ************************************************************************* //

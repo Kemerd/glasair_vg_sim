@@ -7,12 +7,17 @@
 #
 #  UNIT CONVENTION
 #    Every dimensional quantity is a mapping:  {value: <num>, unit: "<tag>"}
-#    Accepted tags: m, mm, in, ft, m2, ft2, mps, mph, kt, deg, kg, lb, slug
-#    Dimensionless quantities are plain numbers.
+#    Accepted tags (authoritative list = UNIT_TO_SI in geometry/units.py):
+#    m, mm, in, ft, m2, ft2, mps, mph, kt, deg, rad, K, kg, lb, slug,
+#    kgpm3, m2ps. Dimensionless quantities are plain numbers.
+#    Angles convert to RADIANS internally.
 #
 #  DATA PROVENANCE (tags used in comments below)
 #    [3VIEW]    Stoddard-Hamilton factory 3-view, drawing rev G, 4/26/90
 #               (ref/Glasair-III-3-View-Drawing.pdf / .dwg / .ai)
+#    [DXF]      measured from the owner-converted factory 3-view DXFs by
+#               scripts/measure_dxf.py (see geometry/dxf/measured.yaml for the
+#               raw extraction; drawings verified 1:1 scale in inches)
 #    [VT2005]   Virginia Tech Glasair III analysis slides, Carobine/
 #               Fitzwater/Jackson, 2005-03-30 (ref/virginia_tech_GlassairIII.pdf)
 #    [IMP74]    Strausak VG flight-test article, IE Impulse #74, Jan 2021,
@@ -20,14 +25,14 @@
 #               used only as the CENTER of our VG sweep ranges
 #    [SPEC]     glasair3-vg-cfd-spec.md project specification
 #    [DERIVED]  computed from other tagged values; formula given in comment
-#    TODO       unknown — needs user input or DXF measurement; placeholder
+#    TODO       unknown — needs user input or further measurement; placeholder
 #               values are flagged and must not be silently trusted
 # =============================================================================
 
 meta:
   aircraft: "Stoddard-Hamilton Glasair III"
   description: "Low-wing all-composite 2-seat experimental, retractable gear"
-  yaml_schema_version: 1
+  yaml_schema_version: 2
 
 # -----------------------------------------------------------------------------
 #  Freestream / atmosphere — sea-level ISA defaults, overridable per case
@@ -42,44 +47,68 @@ atmosphere:
 # -----------------------------------------------------------------------------
 wing:
   airfoil_file: "geometry/ls413.dat"     # NASA/Langley LS(1)-0413 (GA(W)-2) [SPEC]
-  thickness_to_chord: 0.13               # published section t/c [SPEC]
+  thickness_to_chord: 0.13               # published section t/c [SPEC]; the
+  # committed coordinates measure max t/c = 0.1293 @ x/c ~ 0.39 (spline probe).
   # NOTE: [VT2005] slide 7 cites t/c = 12.5% for the as-built wing. The
-  # published LS(1)-0413 section is 13.0% (confirmed from committed
-  # coordinates: max t/c = 0.1298 @ x/c ~ 0.40). Discrepancy is unresolved —
-  # possibly a thinned mod or simply VT approximation. We proceed with the
-  # published 13% section per [SPEC]; revisit if factory docs say otherwise.
-  span:           {value: 23.276,  unit: ft}   # 23' 3-5/16" [3VIEW]; VT rounds to 23.3
-  area_ref:       {value: 87.6,    unit: ft2}  # S_ref [VT2005]
+  # published LS(1)-0413 section is 13.0%. Discrepancy unresolved — possibly a
+  # thinned mod or simply VT approximation. We proceed with the published 13%
+  # section per [SPEC]; revisit if factory docs say otherwise.
+  span:           {value: 23.276,  unit: ft}   # 23' 3-5/16" [3VIEW]; DXF topview
+                                               # measures 279.84 in (0.2% high —
+                                               # tip light fairings included)
+  area_ref:       {value: 87.6,    unit: ft2}  # S_ref [VT2005]. NOTE: the [DXF]
+  # straight-line trapezoid (centerline chord -> tip) integrates to ~82.8 ft2;
+  # VT's S_ref definition likely differs (root fairing / reference convention).
+  # Keep 87.6 as the force-coefficient reference area; geometry comes from the
+  # measured chords below.
   area_exposed:   {value: 81.3,    unit: ft2}  # S_wing exposed [VT2005]
   aspect_ratio: 6.20                           # [VT2005]
-  taper_ratio: 0.75                            # [VT2005]
-  sweep_le:       {value: 0.0,     unit: deg}  # [VT2005] (LE near-straight on plot)
-  dihedral:       {value: 3.0,     unit: deg}  # [3VIEW]
-  washout:        {value: 0.0,     unit: deg}  # TODO unknown; [VT2005] spanload slide
-                                               # explored 1 deg washout hypothetically
-  mac:            {value: 3.76,    unit: ft}   # mean aerodynamic chord [VT2005]
-  chord_root:     {value: 4.297,   unit: ft}   # [DERIVED] 2*S/(b*(1+taper))
-  chord_tip:      {value: 3.223,   unit: ft}   # [DERIVED] taper * chord_root
-  # Chords above match the [VT2005] VLMpc planform plot (~4.3 / ~3.2 ft).
-  # TODO verify chord distribution against DXF when provided (geometry/dxf/).
+  taper_ratio: 0.6031                          # [DXF] centerline->tip
+                                               # (junction->tip 0.647; VT cited
+                                               # 0.75 — drawing wins)
+  sweep_le:       {value: 1.943,   unit: deg}  # [DXF] LE sweeps AFT 1.94 deg
+                                               # (VT slides said 0; drawing wins)
+  dihedral:       {value: 3.0,     unit: deg}  # [3VIEW]; [DXF] frontview projects
+                                               # 3.28 deg (LE) / 2.15 deg (TE) —
+                                               # consistent with 3 deg mean
+  washout:        {value: 0.0,     unit: deg}  # TODO unknown; [VT2005] spanload
+                                               # slide explored 1 deg hypothetically
+  mac:            {value: 3.76,    unit: ft}   # mean aerodynamic chord [VT2005];
+  # kept as the published Re/moment reference. [DXF] trapezoid MAC computes
+  # 43.55 in = 3.63 ft (definitional difference, fuselage carryover).
+  chord_centerline: {value: 53.244, unit: in}  # [DXF] LE/TE lines extrapolated to CL
+  chord_root:     {value: 53.244,  unit: in}   # [DXF] = centerline chord (kept as
+                                               # the trapezoid root for planform_from_yaml)
+  chord_tip:      {value: 32.114,  unit: in}   # [DXF] at TE-line outboard end
+  chord_at_fuselage_junction: {value: 49.633, unit: in}  # [DXF] @ eta 0.1698
+  fuselage_junction_eta: 0.1698                # [DXF] wing-root rib station
 
   aileron:
+    # Geometry below measured from the factory topview [DXF] unless noted.
     area_total:   {value: 4.79,  unit: ft2}    # both sides [VT2005]
-    span_each:    {value: 3.3,   unit: ft}     # [VT2005] "Span = 3.3 ft"
-    span_fraction_total: 0.3342                # b_aileron/b [VT2005]
+    inboard_eta: 0.667                         # [DXF] flap/aileron break rib
+    outboard_eta: 1.0                          # [DXF] runs to the tip joint;
+    # reproduces [VT2005] b_aileron/b = 0.3342 exactly (2*(1-0.667)). VT's
+    # "span 3.3 ft" was likely rib-to-rib; drawing break-to-tip = 46.6 in.
+    span_each:    {value: 46.596, unit: in}    # [DXF]
+    span_fraction_total: 0.333                 # [DXF]; matches [VT2005] 0.3342
     area_fraction: 0.1094                      # S_aileron/S [VT2005]
-    # WARNING: internally inconsistent — 2*3.3/23.276 = 0.284, not 0.334.
-    # TODO resolve from DXF: true aileron spanwise extent + chord fraction.
-    chord_fraction: null                       # TODO from DXF (c_ail/c at station)
+    chord_fraction: 0.1987                     # [DXF] aft of hinge @ mid station
+    hinge_chord_fraction: 0.8013               # [DXF] hinge line @ mid station
+    hinge_gap:    {value: 0.0625, unit: in}    # TODO confirm — assumed same
+                                               # 1/16 in convention as elevator
     deflection_max_up:   {value: 20.0, unit: deg}  # TODO placeholder — confirm
     deflection_max_down: {value: 12.5, unit: deg}  # TODO placeholder — confirm
-    mid_span_station:    {value: 9.3,  unit: ft}   # TODO placeholder = 0.80*b/2;
-    # study-1 section is cut here [SPEC]; refine from DXF aileron extent.
+    mid_span_station:    {value: 116.622, unit: in}  # [DXF] from centerline
+                                                     # (eta = 0.8335); Phase-3
+                                                     # section is cut here
+    chord_at_mid_station: {value: 35.520, unit: in}  # [DXF] = 0.902 m
 
   flap:
     type: "plain"                # standard fit; slotted was factory option [VT2005]
     # TODO confirm which flap the user's aircraft has (changes approach speed)
-    span_fraction: 0.475         # b_flaps/b [VT2005]
+    span_fraction: 0.475         # b_flaps/b [VT2005]; consistent with [DXF]
+                                 # junction (0.17) -> aileron break (0.667)
     area_fraction: 0.075         # S_flaps/S [VT2005]
     deflection_max: {value: 40.0, unit: deg}   # TODO placeholder — confirm
 
@@ -88,29 +117,42 @@ wing:
 # -----------------------------------------------------------------------------
 horizontal_tail:
   airfoil: "NACA 0010"          # TODO placeholder per [SPEC] — actual section unknown
-  area:           {value: 15.54, unit: ft2}    # S_tail [VT2005]
-  span:           {value: 8.2,   unit: ft}     # [DERIVED] from VLMpc planform plot
-                                               # (half-span ~4.1 ft); TODO verify vs DXF
-  chord_root:     {value: 2.3,   unit: ft}     # [DERIVED] from VLMpc plot; TODO verify
-  le_aft_of_wing_root_le: {value: 12.2, unit: ft}  # [DERIVED] from VLMpc plot
+  area:           {value: 15.54, unit: ft2}    # S_tail [VT2005]; [DXF] trapezoid
+                                               # integrates 15.20 ft2 (2% agreement)
+  span:           {value: 96.45, unit: in}     # [DXF] hinge-line extent, both sides
+  chord_root:     {value: 27.578, unit: in}    # [DXF] at centerline
+  chord_tip:      {value: 17.817, unit: in}    # [DXF]
+  taper_ratio: 0.6461                          # [DXF]
+  le_aft_of_wing_root_le: {value: 12.2, unit: ft}  # [DERIVED] from [VT2005] VLMpc
+                                                   # plot; topview [DXF] consistent
   elevator:
     area_total:   {value: 4.85,  unit: ft2}    # [VT2005]
-    hinge_gap:    {value: 1.59,  unit: mm}     # 1/16 in per factory drawing [SPEC]
-    chord_fraction: null                       # TODO from DXF
+    hinge_gap:    {value: 0.0625, unit: in}    # 1/16 in per factory drawing [SPEC]
+                                               # (exactly 1.5875 mm in SI)
+    chord_fraction: 0.34                       # [DXF] 0.3309 @ root, 0.3501 @ tip;
+                                               # single value = span-mean for the
+                                               # constant-section 2.5D studies
+    chord_fraction_root: 0.3309                # [DXF]
+    chord_fraction_tip: 0.3501                 # [DXF]
     deflection_max_up:   {value: 25.0, unit: deg}  # TODO placeholder — confirm
     deflection_max_down: {value: 20.0, unit: deg}  # TODO placeholder — confirm
 
 # -----------------------------------------------------------------------------
-#  Vertical fin / rudder
+#  Vertical fin / rudder      (sideview [DXF]: true lengths, vertical surface)
 # -----------------------------------------------------------------------------
 vertical_tail:
   airfoil: "NACA 0010"          # TODO placeholder per [SPEC] — actual section unknown
-  area: null                    # TODO — [VT2005] gives only wetted 8.482 ft2 (implies
-                                # ~4.24 ft2 planform) yet rudder area 5.35 ft2 exceeds
-                                # that; definitions inconsistent. Resolve from DXF.
+  area: null                    # TODO — fin planform is curved (arcs in the
+                                # drawing); [VT2005] wetted 8.482 ft2 vs rudder
+                                # 5.35 ft2 definitions are inconsistent. Compute
+                                # from a digitized outline when Study 3 needs it.
+  fin_height:     {value: 26.311, unit: in}    # [DXF] fin root rib -> tip along LE
+  chord_root_incl_rudder: {value: 44.778, unit: in}  # [DXF] at fin root station
   rudder:
-    area:         {value: 5.35,  unit: ft2}    # [VT2005] (definition ambiguous, see above)
-    hinge_gap:    {value: 1.59,  unit: mm}     # same 1/16 in gap convention [SPEC]
+    area:         {value: 5.35,  unit: ft2}    # [VT2005] (definition ambiguous)
+    chord_fraction: 0.3712                     # [DXF] at fin root station
+    hinge_rake_from_vertical: {value: 22.125, unit: deg}  # [DXF] hinge leans aft
+    hinge_gap:    {value: 0.0625, unit: in}    # same 1/16 in gap convention [SPEC]
     deflection_max: {value: 25.0, unit: deg}   # TODO placeholder — confirm
 
 # -----------------------------------------------------------------------------
@@ -119,6 +161,7 @@ vertical_tail:
 fuselage:
   length:         {value: 21.167, unit: ft}    # 21' 2" [3VIEW]
   wetted_area:    {value: 232.66, unit: ft2}   # [VT2005]
+  half_width_at_wing: {value: 23.76, unit: in} # [DXF] wing-root rib offset from CL
 
 # -----------------------------------------------------------------------------
 #  Weights & balance
@@ -174,5 +217,7 @@ vg_defaults:
 # -----------------------------------------------------------------------------
 solver:
   openfoam_flavor: "ESI (OpenFOAM.com)"   # preferred for kOmegaSSTLM [SPEC]
-  openfoam_version: null                  # TODO pin exact version at install (>= v2406)
+  openfoam_version: "v2506"               # pinned; matches the openfoam2506 paths in
+                                          # Allrun / run_validation.sh / README. Verify
+                                          # against the actual install at WSL bring-up.
   turbulence_model: "kOmegaSSTLM"         # gamma-Re_theta transition [SPEC]

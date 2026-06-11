@@ -1,0 +1,50 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  forceCoeffs function object -- Phase-1 clean-section 2D validation case    |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+
+// Lift and drag DIRECTIONS rotated with the AoA (-4 deg): the mesh
+// never moves, the freestream vector does, so the coefficient axes must
+// follow the WIND frame, not the mesh frame:
+//     dragDir = ( cos a,  sin a, 0)   -- along the freestream
+//     liftDir = (-sin a,  cos a, 0)   -- 90 deg CCW from it
+// Both are unit vectors and mutually orthogonal by construction (verified
+// by tests/test_case_gen.py).
+
+forceCoeffs1
+{
+    type            forceCoeffs;
+    libs            (forces);
+
+    // Per-iteration history: the convergence gate needs the last 500
+    // iterations of Cl/Cd to judge force flatness (< 0.5% oscillation).
+    writeControl    timeStep;
+    writeInterval   1;
+
+    patches         (airfoil);
+
+    // Incompressible solver carries kinematic pressure, so the dynamic
+    // pressure is reconstructed with the reference density from
+    // aircraft.yaml (ISA sea level).
+    rho             rhoInf;
+    rhoInf          1.225;
+
+    liftDir         (0.069756474 0.99756405 0);
+    dragDir         (0.99756405 -0.069756474 0);
+
+    // Moments about the quarter chord (c = 1 m, LE at x = 0), pitch axis =
+    // the 2D spanwise direction.
+    CofR            (0.25 0 0);
+    pitchAxis       (0 0 1);
+
+    magUInf         43.821;
+    lRef            1.0;       // chord; the 2D convention is c = 1 m
+
+    // Reference area = chord x z-thickness of the one-cell-deep mesh
+    // (forces integrate over that physical depth, so Aref must include it
+    // for Cl/Cd to come out per unit span).
+    Aref            0.1;
+}
+
+// ************************************************************************* //

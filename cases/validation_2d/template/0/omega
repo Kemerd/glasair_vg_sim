@@ -1,0 +1,64 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Specific dissipation rate -- Phase-1 clean-section 2D validation case      |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      omega;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// omega_inf = k_inf / (nu * (nut/nu)) with eddy-viscosity ratio nut/nu = 10,
+// the TOP of the Langtry-Menter recommended 1..10 inlet band. The high ratio
+// is chosen deliberately: freestream k decays as dk/dt = -beta* k omega, so
+// the SMALLEST admissible omega gives the SLOWEST Tu decay over the 25 c of
+// travel between the far boundary and the airfoil, keeping the LE-incident
+// Tu near the Mack/Ncrit value documented in 0/k. omega_inf = @OMEGA_INF@.
+
+dimensions      [0 0 -1 0 0 0 0];
+
+internalField   uniform @OMEGA_INF@;
+
+boundaryField
+{
+    airfoil
+    {
+        // omegaWallFunction is NOT a high-Re compromise: in ESI OpenFOAM it
+        // blends the viscous-sublayer asymptote omega = 6 nu / (beta1 y^2)
+        // with the log-layer value and is the recommended omega condition
+        // down to y+ < 1 (Menter's boundary condition is singular at the
+        // wall and cannot be imposed as a finite fixedValue). The 'value'
+        // entry is only an initial placeholder; the function overwrites it.
+        type            omegaWallFunction;
+        blending        binomial;
+        value           uniform @OMEGA_INF@;
+    }
+
+    farfield
+    {
+        // Freestream level on inflow, zeroGradient on outflow -- consistent
+        // with the freestream U/p treatment of this boundary.
+        type            inletOutlet;
+        inletValue      uniform @OMEGA_INF@;
+        value           uniform @OMEGA_INF@;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform @OMEGA_INF@;
+        value           uniform @OMEGA_INF@;
+    }
+
+    frontAndBack
+    {
+        // 2D empty direction.
+        type            empty;
+    }
+}
+
+// ************************************************************************* //

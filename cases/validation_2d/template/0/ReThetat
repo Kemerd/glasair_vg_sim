@@ -1,0 +1,61 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Transition momentum-thickness Reynolds number -- Phase-1 validation case   |
+|  Langtry-Menter gamma-Re_theta transition model (kOmegaSSTLM)               |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      ReThetat;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Freestream Re_theta_t from the Langtry-Menter empirical correlation
+// (zero pressure gradient branch, Tu in PERCENT, valid for Tu <= 1.3 %):
+//     Re_theta_t = 1173.51 - 589.428 Tu + 0.2196 / Tu^2
+// evaluated at the Mack-derived Tu = @TU_PERCENT@ % (see 0/k), giving
+// Re_theta_t,inf = @RETHETAT_INF@. Inside the boundary layer the model
+// recomputes the local value from its own correlations; the freestream
+// value mainly sets the laminar default the BL relaxes toward.
+
+dimensions      [0 0 0 0 0 0 0];
+
+internalField   uniform @RETHETAT_INF@;
+
+boundaryField
+{
+    airfoil
+    {
+        // Published Langtry-Menter wall condition: zero normal flux. The
+        // wall value of Re_theta_t is an outcome of the transport equation,
+        // never an imposed quantity.
+        type            zeroGradient;
+    }
+
+    farfield
+    {
+        // Correlation value on inflow, free on outflow -- same inletOutlet
+        // pattern as every other transported scalar on this boundary.
+        type            inletOutlet;
+        inletValue      uniform @RETHETAT_INF@;
+        value           uniform @RETHETAT_INF@;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform @RETHETAT_INF@;
+        value           uniform @RETHETAT_INF@;
+    }
+
+    frontAndBack
+    {
+        // 2D empty direction.
+        type            empty;
+    }
+}
+
+// ************************************************************************* //

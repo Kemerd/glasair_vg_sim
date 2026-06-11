@@ -1,0 +1,147 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Boundary-layer sample lines -- Phase-1 clean-section 2D validation case    |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+
+// Wall-normal profile lines on the SUCTION surface at the Phase-1 stations
+// x/c = 0.05 0.07 0.10 0.15 0.20 0.30 0.40 0.50 0.60 0.70 0.80 0.90.
+// Each line starts a hair off the wall (so the first sample lands inside
+// the first cell, not on the boundary face) and runs 0.15 c along the LOCAL
+// surface normal -- comfortably past delta even at high AoA. The builder
+// computes the anchor points and normals from the same resampled LS(1)-0413
+// loop the mesh was built from, so the lines track the actual surface.
+// Downstream, the BL-extraction utility integrates these profiles into the
+// delta / delta* table that sizes the VGs (spec Phase-1 item 5).
+
+blProfiles
+{
+    type            sets;
+    libs            (sampling);
+
+    // Sample once, from the CONVERGED solution: profiles from a half-
+    // converged state would poison the VG-sizing table.
+    writeControl    onEnd;
+
+    interpolationScheme cellPoint;
+
+    // raw = plain numeric columns; trivially parsed by the Phase-1
+    // BL-extraction script with numpy.loadtxt.
+    setFormat       raw;
+
+    fields          (U p k omega nut gammaInt ReThetat);
+
+    sets
+    (
+        bl_x005
+        {
+            // x/c = 0.05 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.04999965497 0.0448010199 0.05);
+            end     (-0.001754602033 0.1855887924 0.05);
+            nPoints 600;
+        }
+        bl_x007
+        {
+            // x/c = 0.07 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.06999972803 0.05122464755 0.05);
+            end     (0.02920435877 0.1955695049 0.05);
+            nPoints 600;
+        }
+        bl_x010
+        {
+            // x/c = 0.10 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.0999997889 0.05860118204 0.05);
+            end     (0.06833522969 0.2052199247 0.05);
+            nPoints 600;
+        }
+        bl_x015
+        {
+            // x/c = 0.15 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.1499998532 0.06750139749 0.05);
+            end     (0.1279738426 0.2158744235 0.05);
+            nPoints 600;
+        }
+        bl_x020
+        {
+            // x/c = 0.20 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.1999998913 0.07400085464 0.05);
+            end     (0.1836889953 0.2231103938 0.05);
+            nPoints 600;
+        }
+        bl_x030
+        {
+            // x/c = 0.30 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.2999999449 0.08180093799 0.05);
+            end     (0.2917424704 0.2315724777 0.05);
+            nPoints 600;
+        }
+        bl_x040
+        {
+            // x/c = 0.40 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.3999999943 0.08460046709 0.05);
+            end     (0.3991386229 0.2345969939 0.05);
+            nPoints 600;
+        }
+        bl_x050
+        {
+            // x/c = 0.50 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.500000042 0.08290099912 0.05);
+            end     (0.5062928291 0.2327679429 0.05);
+            nPoints 600;
+        }
+        bl_x060
+        {
+            // x/c = 0.60 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.6000000993 0.0760996626 0.05);
+            end     (0.6148941181 0.2253573867 0.05);
+            nPoints 600;
+        }
+        bl_x070
+        {
+            // x/c = 0.70 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.7000001576 0.06290068111 0.05);
+            end     (0.7236428793 0.211024689 0.05);
+            nPoints 600;
+        }
+        bl_x080
+        {
+            // x/c = 0.80 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.8000002011 0.04450090653 0.05);
+            end     (0.8301600982 0.1914365408 0.05);
+            nPoints 600;
+        }
+        bl_x090
+        {
+            // x/c = 0.90 on the upper (suction) surface
+            type    uniform;
+            axis    distance;
+            start   (0.9000002241 0.02270087881 0.05);
+            end     (0.9336158937 0.168884622 0.05);
+            nPoints 600;
+        }
+    );
+}
+
+// ************************************************************************* //

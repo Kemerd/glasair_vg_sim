@@ -1,0 +1,67 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Velocity field -- Phase-1 clean-section 2D validation case                 |
+|  Template: cases/validation_2d/template  (instantiated by                   |
+|  scripts/build_validation_case.py from aircraft.yaml + CLI; placeholder     |
+|  tokens are replaced at build time and must not survive into a run)         |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volVectorField;
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Case val2d_aoa19_re3e6_lvl0: AoA = 19 deg, Re = 3e6 at c = 1 m.
+// Convention for the whole 2D validation series: chord c = 1.0 m and
+// U = Re * nu / c with nu taken from aircraft.yaml (ISA sea level), so the
+// requested Re is met exactly: U = 43.821 m/s here (Mach 0.129).
+// The MESH stays at zero incidence and the freestream VECTOR is rotated by
+// the AoA instead -- one mesh family serves the entire -4..+20 deg sweep,
+// which is what makes polar deltas trustworthy (spec section 4: identical
+// meshes for every comparison).
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform (41.43357 14.266722 0);
+
+boundaryField
+{
+    airfoil
+    {
+        // Viscous wall on a wall-resolved mesh (first-cell y+ < 1 by
+        // construction, see system/blockMeshDict): plain no-slip, no
+        // wall-model assumption anywhere on the section.
+        type            noSlip;
+    }
+
+    farfield
+    {
+        // C-arc plus the top/bottom straight boundaries, all >= 25 c away.
+        // freestreamVelocity switches per-face between fixedValue (where the
+        // flux enters) and zeroGradient (where it leaves), so the same patch
+        // works at every AoA without re-tagging which side is "inlet".
+        type            freestreamVelocity;
+        freestreamValue uniform (41.43357 14.266722 0);
+    }
+
+    outlet
+    {
+        // Outflow plane 25 c behind the trailing edge. inletOutlet guards
+        // the startup transient: any momentary backflow re-enters at rest
+        // instead of dragging in an unbounded zeroGradient value.
+        type            inletOutlet;
+        inletValue      uniform (0 0 0);
+        value           uniform (41.43357 14.266722 0);
+    }
+
+    frontAndBack
+    {
+        // One-cell-thick planar mesh: the z faces carry the OpenFOAM 2D
+        // convention 'empty' (no equation is solved normal to them).
+        type            empty;
+    }
+}
+
+// ************************************************************************* //

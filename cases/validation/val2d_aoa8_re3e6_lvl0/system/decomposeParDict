@@ -1,0 +1,28 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  decomposeParDict -- Phase-1 clean-section 2D validation case               |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      decomposeParDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// 8 ranks per 2D case: the meshes top out around 1e5 cells at refinement
+// level 2, so 8 cores keeps >= 10k cells/core (below that, MPI overhead
+// eats the speedup). On the 24C/32T host this also leaves room to run three
+// AoA points of the polar concurrently, which is how the sweep runner will
+// schedule them.
+
+numberOfSubdomains 8;
+
+// Graph partitioning: scotch needs no geometric hints and handles the
+// strongly-graded C-topology better than 'simple' axis-aligned slabs, which
+// would put all the tiny BL cells in one rank.
+method          scotch;
+
+// ************************************************************************* //

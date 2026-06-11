@@ -1,0 +1,58 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Kinematic pressure field -- Phase-1 clean-section 2D validation case       |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      p;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Incompressible solver: p is KINEMATIC pressure (p/rho, m^2/s^2). The
+// gauge level is anchored to 0 at the far boundaries; absolute level is
+// irrelevant to the forces, which are referenced to 0.5*U^2 downstream.
+
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform 0;
+
+boundaryField
+{
+    airfoil
+    {
+        // Standard high-Re wall condition for pressure: the wall-normal
+        // pressure gradient is negligible inside the resolved sublayer.
+        type            zeroGradient;
+    }
+
+    farfield
+    {
+        // freestreamPressure is the mixed companion of freestreamVelocity:
+        // it fixes p where flow LEAVES (anchoring the level) and relaxes to
+        // zeroGradient where flow ENTERS, the consistent pairing for a far
+        // boundary crossed in both directions over the AoA sweep.
+        type            freestreamPressure;
+        freestreamValue uniform 0;
+    }
+
+    outlet
+    {
+        // Hard pressure anchor on the pure-outflow plane; the same gauge
+        // value (0) as the farfield freestreamValue so the two anchors can
+        // never fight each other.
+        type            fixedValue;
+        value           uniform 0;
+    }
+
+    frontAndBack
+    {
+        // 2D empty direction.
+        type            empty;
+    }
+}
+
+// ************************************************************************* //

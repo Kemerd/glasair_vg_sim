@@ -19,5 +19,16 @@ cases/**/[0-9]*.[0-9]*/
 # --- Rendered reference pages (regenerable from PDFs via ref/extract_pdfs.py) ---
 ref/pages/
 
+# --- AutoCAD lock-file debris from DWG->DXF conversion ---
+*.dwl
+*.dwl2
+
+# --- Third-party tool binaries: never committed; re-download instructions
+#     and provenance hashes live in tools/xfoil/SOURCE.md (kept in git) ---
+tools/*
+!tools/xfoil/
+tools/xfoil/*
+!tools/xfoil/SOURCE.md
+
 # --- Generated geometry (regenerable from aircraft.yaml + toolkit) ---
 *.stl

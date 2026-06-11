@@ -1,0 +1,71 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  controlDict -- Phase-1 clean-section 2D validation case                    |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Steady SIMPLE solve. Post-stall AoA points that refuse to converge fall
+// back to pimpleFoam pseudo-transient (local Euler time stepping); the exact
+// dictionary deltas for that switch are documented in this case's README.md
+// so the fallback is a recorded, reproducible change -- never a hand edit
+// that drifts from the template (spec section 4 reproducibility rule).
+
+application     simpleFoam;
+
+startFrom       latestTime;
+startTime       0;
+
+stopAt          endTime;
+
+// Iteration budget: transition cases converge slower than fully-turbulent
+// SST because the intermittency field has to settle; 6000 outer iterations
+// is headroom -- fvSolution residualControl stops the run early once every
+// residual is below the spec gate (1e-5) with margin.
+endTime         6000;
+
+deltaT          1;
+
+writeControl    timeStep;
+writeInterval   1000;
+
+// Keep only the last two snapshots: intermediate fields are restart
+// insurance, not results; forces/residuals/yPlus histories are written
+// every step by the function objects below regardless.
+purgeWrite      2;
+
+writeFormat     ascii;
+writePrecision  8;
+writeCompression off;
+
+timeFormat      general;
+timePrecision   6;
+
+runTimeModifiable true;
+
+functions
+{
+    // Lift/drag/moment coefficients with AoA-rotated direction vectors.
+    #include "forceCoeffs"
+
+    // Per-iteration initial-residual history (the spec convergence gate
+    // audits residuals < 1e-5 AND flat forces from these files).
+    #include "residuals"
+
+    // Wall y+ verification: spec section 4 fails any case with max y+ > 2
+    // over more than 1% of wall faces; this writes the evidence.
+    #include "yPlusObj"
+
+    // Wall-normal boundary-layer profile lines on the suction surface
+    // (Phase-1 item 5: the delta/delta* table that sizes the VGs).
+    #include "sampling"
+}
+
+// ************************************************************************* //

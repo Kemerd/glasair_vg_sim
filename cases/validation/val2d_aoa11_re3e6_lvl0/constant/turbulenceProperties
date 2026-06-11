@@ -1,0 +1,36 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Turbulence model selection -- Phase-1 clean-section 2D validation case     |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      turbulenceProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// kOmegaSSTLM = Langtry-Menter gamma-Re_theta transition model on the SST
+// substrate (ESI implementation; the reason this project pins the ESI
+// OpenFOAM flavor, see aircraft.yaml solver block). Mandatory per the spec:
+// the LS(1)-0413 on a composite skin carries significant laminar run, and
+// the boundary-layer thickness at the VG station -- the quantity that sizes
+// the vanes -- depends directly on where transition lands. Plain SST would
+// be fully turbulent from the LE and oversize delta everywhere.
+
+simulationType  RAS;
+
+RAS
+{
+    RASModel        kOmegaSSTLM;
+
+    turbulence      on;
+
+    // Echo the effective coefficients into the log so each run records the
+    // exact model constants it used (reproducibility rule, spec section 4).
+    printCoeffs     on;
+}
+
+// ************************************************************************* //

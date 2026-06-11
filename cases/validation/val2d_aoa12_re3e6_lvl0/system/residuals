@@ -1,0 +1,27 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Residual history function object -- Phase-1 clean-section validation case  |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+
+// solverInfo writes the per-iteration initial residual of every listed
+// field to postProcessing/residuals/<time>/solverInfo.dat. This file is the
+// machine-readable half of the spec convergence gate (residuals < 1e-5);
+// the gate script parses it instead of scraping the solver log.
+
+residuals
+{
+    type            solverInfo;
+    libs            (utilityFunctionObjects);
+
+    fields          (p U k omega gammaInt ReThetat);
+
+    // History only -- the residual FIELDS (volScalarFields per cell) are
+    // bulky and only needed when debugging a stuck case by eye.
+    writeResidualFields no;
+
+    writeControl    timeStep;
+    writeInterval   1;
+}
+
+// ************************************************************************* //

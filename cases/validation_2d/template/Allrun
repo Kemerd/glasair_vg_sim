@@ -1,0 +1,58 @@
+#!/bin/bash
+# -----------------------------------------------------------------------------
+#  Allrun -- Phase-1 clean-section 2D validation case @CASE_NAME@
+#  Target environment: WSL2 Ubuntu, ESI OpenFOAM v2506 (package openfoam2506).
+#  The case is dry-run friendly: if no OpenFOAM environment is found this
+#  script explains itself and exits nonzero without touching anything.
+# -----------------------------------------------------------------------------
+set -e
+cd "$(dirname "$0")"
+
+# Pick up the pinned toolkit when the shell is not already inside an OpenFOAM
+# environment. The path below is where the Ubuntu openfoam2506 package lands.
+if [ -z "$WM_PROJECT" ]; then
+    OF_BASHRC="/usr/lib/openfoam/openfoam2506/etc/bashrc"
+    if [ -f "$OF_BASHRC" ]; then
+        # shellcheck disable=SC1090
+        . "$OF_BASHRC"
+    else
+        echo "Allrun: no OpenFOAM environment active and $OF_BASHRC not found."
+        echo "Allrun: install ESI OpenFOAM v2506 (apt package openfoam2506) in WSL2,"
+        echo "Allrun: or source its etc/bashrc first. Case files are ready to run."
+        exit 1
+    fi
+fi
+
+# Mesh, then verify it. checkMesh exits 0 even when checks FAIL (its exit
+# status only reflects whether it ran), so the real gate is the log content:
+# a failing mesh prints 'Failed <n> mesh checks.' and must stop the pipeline
+# before any solver time is burned (mesh-generator bugs, spec section 4).
+blockMesh > log.blockMesh 2>&1
+checkMesh > log.checkMesh 2>&1
+if grep -qE 'Failed [0-9]+ mesh checks' log.checkMesh; then
+    echo "Allrun: checkMesh FAILED -- see log.checkMesh:"
+    grep -E 'Failed [0-9]+ mesh checks' log.checkMesh
+    exit 1
+fi
+
+# Decompose per system/decomposeParDict (scotch). The MPI rank count below
+# is read FROM that dictionary so the two can never drift apart -- the
+# dictionary is the single authority on the decomposition (its value is
+# level-dependent, set by the case builder).
+NPROCS=$(foamDictionary -entry numberOfSubdomains -value system/decomposeParDict)
+decomposePar -force > log.decomposePar 2>&1
+
+# Solver from system/controlDict, not hard-coded: the steady run uses
+# simpleFoam, while the documented post-stall fallback swaps in pimpleFoam
+# via the pimple_overrides/ variant dictionaries (see README.md) -- this
+# script runs whichever application the case is currently configured for.
+# residualControl in fvSolution stops the steady solve once every residual
+# is below the spec gate with margin.
+APP=$(foamDictionary -entry application -value system/controlDict)
+mpirun -np "$NPROCS" "$APP" -parallel > "log.$APP" 2>&1
+
+# Reassemble for post-processing (BL profile sets, wall shear surface dump,
+# yPlus field, fields).
+reconstructPar -latestTime > log.reconstructPar 2>&1
+
+echo "Allrun: complete. Histories in postProcessing/, logs in log.*"

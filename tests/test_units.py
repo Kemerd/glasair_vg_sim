@@ -2,9 +2,10 @@
 
 Spot-check values are the exact legal conversion definitions (NIST SP 811 /
 BIPM SI brochure); aircraft.yaml expectations trace to the provenance tags in
-that file ([3VIEW] factory drawing, [VT2005] Virginia Tech slides, [IMP74]
-Strausak Impulse #74 article). If a YAML number is deliberately revised, the
-corresponding expectation here must be revised in the same commit.
+that file ([3VIEW] factory drawing, [DXF] measured 3-view DXFs, [VT2005]
+Virginia Tech slides, [IMP74] Strausak Impulse #74 article). If a YAML number
+is deliberately revised, the corresponding expectation here must be revised
+in the same commit (schema v2 expectations below).
 """
 
 from __future__ import annotations
@@ -148,8 +149,12 @@ def test_wing_mac_si(ac: AircraftParams) -> None:
 
 
 def test_dimensionless_passthrough(ac: AircraftParams) -> None:
-    """Plain scalars (taper ratio, AR) arrive untouched and untyped-converted."""
-    assert ac.wing.taper_ratio == 0.75
+    """Plain scalars (taper ratio, AR) arrive untouched and untyped-converted.
+
+    Taper is the [DXF] centerline-to-tip value from the schema-v2 rewrite
+    (the drawing supersedes VT's 0.75); AR stays the [VT2005] number.
+    """
+    assert ac.wing.taper_ratio == 0.6031
     assert ac.wing.aspect_ratio == 6.20
 
 
@@ -174,10 +179,45 @@ def test_togw_si(ac: AircraftParams) -> None:
 
 
 def test_none_passthrough(ac: AircraftParams) -> None:
-    """Unresolved YAML nulls stay None so downstream code can refuse them."""
+    """Unresolved YAML nulls stay None so downstream code can refuse them.
+
+    vertical_tail.area is deliberately null in schema v2 (curved fin
+    planform, deferred until Study 3 digitizes the outline). It is the last
+    live null in the master file: solver.openfoam_version was pinned to
+    "v2506" at M1, so its None-passthrough coverage moved to the synthetic
+    fixture below.
+    """
     assert ac.vertical_tail.area is None
-    # Another deliberate unknown, nested one level deeper.
-    assert ac.wing.aileron.chord_fraction is None
+
+
+def test_none_passthrough_synthetic(tmp_path: Path) -> None:
+    """A null in any nested block loads as None (synthetic file).
+
+    Exercised on a throwaway YAML because the master file no longer carries
+    a solver-block null; the loader behavior must survive regardless of
+    which keys happen to be resolved in aircraft.yaml at any given time.
+    """
+    mini = tmp_path / "mini.yaml"
+    mini.write_text(
+        "solver:\n"
+        "  openfoam_version: null\n"
+        "  turbulence_model: kOmegaSSTLM\n",
+        encoding="utf-8",
+    )
+    ac2 = load_aircraft(mini)
+    assert ac2.solver.openfoam_version is None
+    # Sibling strings in the same block still pass through verbatim.
+    assert ac2.solver.turbulence_model == "kOmegaSSTLM"
+
+
+def test_solver_version_pinned(ac: AircraftParams) -> None:
+    """solver.openfoam_version is the M1-pinned "v2506" string, verbatim.
+
+    The pin is part of the section-4 reproducibility rule (every case must
+    be rebuildable from aircraft.yaml + the pinned OpenFOAM version); a
+    silent edit back to null or another release must trip the suite.
+    """
+    assert ac.solver.openfoam_version == "v2506"
 
 
 def test_cruise_points_list_recursion(ac: AircraftParams) -> None:
@@ -212,8 +252,16 @@ def test_angles_converted_throughout(ac: AircraftParams) -> None:
 
 
 def test_hinge_gap_si(ac: AircraftParams) -> None:
-    """[SPEC] 1/16-inch hinge gap entered as 1.59 mm -> 0.00159 m."""
-    assert ac.horizontal_tail.elevator.hinge_gap == pytest.approx(0.00159, abs=1e-9)
+    """[SPEC] 1/16-inch hinge gap stored as {0.0625 in} in schema v2.
+
+    The international inch is exact (0.0254 m), so the SI value is exactly
+    0.0625 * 0.0254 = 1.5875e-3 m — no rounded 1.59 mm intermediate. The
+    aileron and rudder carry the same factory gap convention; checked here
+    too so a single-surface YAML edit cannot drift silently.
+    """
+    assert ac.horizontal_tail.elevator.hinge_gap == pytest.approx(1.5875e-3, abs=1e-12)
+    assert ac.wing.aileron.hinge_gap == pytest.approx(1.5875e-3, abs=1e-12)
+    assert ac.vertical_tail.rudder.hinge_gap == pytest.approx(1.5875e-3, abs=1e-12)
 
 
 # =============================================================================

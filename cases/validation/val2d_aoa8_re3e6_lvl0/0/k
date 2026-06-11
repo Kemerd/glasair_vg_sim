@@ -1,0 +1,69 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Turbulent kinetic energy -- Phase-1 clean-section 2D validation case       |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      k;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Inlet turbulence chain (documented so a reviewer can audit the numbers):
+//   XFOIL anchor uses e^N with Ncrit = 9. Mack's relation
+//       Ncrit = -8.43 - 2.4 ln(Tu)        (Tu as a fraction)
+//   inverts to Tu = exp(-(8.43 + Ncrit)/2.4) ~ 0.0007 = 0.07014 %,
+//   so the RANS transition model sees the same disturbance environment as
+//   the e^N comparison. Then k_inf = 1.5 (Tu * U)^2 = 0.00141687 m^2/s^2.
+// Freestream decay caveat: between the boundary (25 c out) and the leading
+// edge, k decays at a rate set by omega; the companion omega file picks the
+// LOW end of that decay (eddy-viscosity ratio 10, the top of the
+// Langtry-Menter recommended 1..10 band) precisely to keep the LE-incident
+// Tu close to the Mack value. Residual decay (~tens of percent on Tu) is
+// accepted and identical across the polar -- the study reads deltas.
+
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform 0.00141687;
+
+boundaryField
+{
+    airfoil
+    {
+        // Low-Re (wall-resolved) treatment: k -> 0 at a smooth wall. A tiny
+        // positive floor instead of an exact zero keeps k off the absolute
+        // zero that some limiters and post-processing ratios dislike, while
+        // being ~7 orders below the freestream level -- physically zero.
+        type            fixedValue;
+        value           uniform 1e-10;
+    }
+
+    farfield
+    {
+        // Freestream level where flow enters, zeroGradient where it leaves
+        // (inletOutlet), matching the freestream U/p pairing on this patch.
+        type            inletOutlet;
+        inletValue      uniform 0.00141687;
+        value           uniform 0.00141687;
+    }
+
+    outlet
+    {
+        // Wake leaves through here; backflow guard returns the freestream
+        // level rather than amplifying whatever was advected out.
+        type            inletOutlet;
+        inletValue      uniform 0.00141687;
+        value           uniform 0.00141687;
+    }
+
+    frontAndBack
+    {
+        // 2D empty direction.
+        type            empty;
+    }
+}
+
+// ************************************************************************* //

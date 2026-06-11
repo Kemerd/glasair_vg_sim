@@ -1,4 +1,4 @@
-"""Wing/tail planform extraction from 3-view DXF linework, with YAML fallback.
+"""Wing/tail planform extraction from DXF linework, with YAML fallback.
 
 This is the M0 "DXF parse stub" required by glasair3-vg-cfd-spec.md Phase 0
 item 2 ("DXF reader: extract wing chord distribution ... fall back to
@@ -6,24 +6,45 @@ parameters in a single aircraft.yaml"). The implemented surface is a straight
 tapered (trapezoidal) panel: root/tip chords, span, leading-edge sweep, plus
 the derived area and mean aerodynamic chord. That is exactly the level of
 fidelity the extruded-section studies consume — they need the local chord at
-a spanwise station (Planform.chord_at) and nothing more. Curved planform
-breaks, aileron cutouts and hinge lines remain on the roadmap once a real
-DXF is available to define them.
+a spanwise station (Planform.chord_at) and nothing more.
 
-DWG NOTE (read this before reporting a parse failure): the factory 3-view at
-ref/Glasair-III-3-View-Drawing.dwg is a DWG, a proprietary binary format that
-ezdxf cannot read. Convert it externally — e.g. the free ODA File Converter,
-or a "save as DXF" from any CAD package — and drop the resulting .dxf into
-geometry/dxf/. Until a converted drawing exists there, the YAML fallback
-(planform_from_yaml) governs all planform numbers, per the spec's "do not
-block on the DXFs" directive.
+CONVERTED DRAWINGS (status as committed)
+  Three owner-converted factory 3-view DXFs live in geometry/dxf/:
+      glasair_topview.dxf / glasair_sideview.dxf / glasair_frontview.dxf
+  all verified 1:1 scale in inches ($INSUNITS = 1). They are FULL-SHEET
+  aircraft views — both wing halves, fuselage, tail and annotation linework
+  share one modelspace with no layer separation — NOT clean single-panel
+  exports. read_dxf_planform's one-panel assumption does not hold for them:
+  fed the raw topview it would report the whole sheet's bounding rows as a
+  "wing" (a plausible-looking but wrong trapezoid). Those drawings are
+  instead measured by scripts/measure_dxf.py, an aircraft-SPECIFIC feature
+  extractor, into geometry/dxf/measured.yaml, and the results were folded
+  into aircraft.yaml under [DXF] provenance tags. read_dxf_planform remains
+  the GENERIC reader for future clean single-panel exports; the YAML
+  fallback (planform_from_yaml) governs whenever the drawing is ambiguous.
+
+SANITY GATE
+  Because a violated panel assumption fails SILENTLY (sheet extents still
+  form a perfectly plausible trapezoid), read_dxf_planform accepts an
+  optional ``reference`` Planform — normally built by planform_from_yaml —
+  and raises DxfParseError when the extracted span or root chord deviates
+  more than 20% from it. The CLI arms the gate when --yaml is passed. A
+  full-sheet 3-view such as the committed topview WILL trip the gate; that
+  is by design, and the error text routes the user to the YAML fallback.
+
+DWG NOTE: the factory 3-view source at ref/Glasair-III-3-View-Drawing.dwg is
+a DWG, a proprietary binary format ezdxf cannot read. The committed DXFs
+above were converted externally (e.g. the free ODA File Converter, or a
+"save as DXF" from any CAD package); the same route applies to any future
+drawing dropped into geometry/dxf/.
 
 DATA PROVENANCE
-  Trapezoid fallback values originate in aircraft.yaml, which carries its own
-  per-line provenance tags: [3VIEW] Stoddard-Hamilton factory 3-view rev G
-  4/26/90, [VT2005] Virginia Tech Glasair III analysis 2005-03-30, [DERIVED]
-  with formulas in comments. The standard trapezoid MAC/area formulas used
-  here are e.g. Raymer, "Aircraft Design: A Conceptual Approach", eq. 4.15.
+  aircraft.yaml carries per-line provenance tags: [DXF] measured from the
+  converted 3-views by scripts/measure_dxf.py, [3VIEW] Stoddard-Hamilton
+  factory 3-view rev G 4/26/90, [VT2005] Virginia Tech Glasair III analysis
+  2005-03-30, [DERIVED] with formulas in comments. The standard trapezoid
+  MAC/area formulas used here are e.g. Raymer, "Aircraft Design: A
+  Conceptual Approach", eq. 4.15.
 
 COORDINATE / UNIT CONVENTIONS FOR INPUT DXF LINEWORK
   x = chordwise (LE -> TE), y = spanwise (root -> tip), matching the
@@ -31,12 +52,16 @@ COORDINATE / UNIT CONVENTIONS FOR INPUT DXF LINEWORK
   root rib to tip — the usual way a 3-view wing half is drafted — so the
   full span is twice the drawn spanwise extent. Modelspace units are taken
   from the $INSUNITS header variable; a unitless drawing (code 0, the ezdxf
-  default) is assumed to be meters, and that assumption is printed by the
-  CLI summary so it cannot pass unnoticed.
+  default) is assumed to be meters. The CLI summary prints the resolved
+  units and scale (and flags the unitless-assumed-meters case explicitly)
+  so the assumption cannot pass unnoticed.
 
 Run as a script for interactive use:
     python geometry/dxf_reader.py geometry/dxf/<file>.dxf [--layer WING]
-prints the layer list and the extracted planform summary (plain ASCII).
+                                  [--yaml aircraft.yaml]
+prints the layer list, the resolved $INSUNITS scale, and the extracted
+planform summary (plain ASCII). Passing --yaml builds the reference planform
+from that file and applies the 20% sanity gate described above.
 """
 
 from __future__ import annotations
@@ -167,7 +192,7 @@ class Planform:
 
 
 # =============================================================================
-#  YAML fallback path (the governing source until a converted DXF exists)
+#  YAML fallback path (the governing source for ambiguous/full-sheet drawings)
 # =============================================================================
 def planform_from_yaml(ac: "AircraftParams") -> Planform:
     """Build the wing Planform from the aircraft.yaml wing block.
@@ -175,9 +200,11 @@ def planform_from_yaml(ac: "AircraftParams") -> Planform:
     All values arrive pre-converted to SI by geometry/units.py (lengths in
     meters, angles in radians), so this function is pure assembly plus one
     derivation fallback: when explicit chords are absent it inverts the
-    trapezoid area formula, mirroring the [DERIVED] entries documented in
-    aircraft.yaml itself:
+    trapezoid area formula:
         c_root = 2 S / (b (1 + lambda)),   c_tip = lambda * c_root
+    The committed aircraft.yaml (schema v2) carries explicit [DXF]-measured
+    chords — root 53.244 in, tip 32.114 in — so the fallback derivation is
+    dormant there; it remains for sparser YAMLs reusing this pattern.
     """
     wing = ac.wing
 
@@ -208,7 +235,7 @@ def planform_from_yaml(ac: "AircraftParams") -> Planform:
         chord_tip = taper * chord_root
 
     # LE sweep is optional context (already radians via units.py). The
-    # committed value is 0 deg per [VT2005]; None simply propagates.
+    # committed value is 1.943 deg aft per [DXF]; None simply propagates.
     sweep = getattr(wing, "sweep_le", None)
 
     return Planform(
@@ -241,6 +268,25 @@ _INSUNITS_TO_M: Dict[int, float] = {
     7: 1.0e3,     # kilometers
 }
 
+#  Human-readable names for the supported codes, used by the CLI summary so
+#  the resolved unit assumption is visible in plain language, not just a code.
+_INSUNITS_NAMES: Dict[int, str] = {
+    0: "unitless",
+    1: "inches",
+    2: "feet",
+    4: "millimeters",
+    5: "centimeters",
+    6: "meters",
+    7: "kilometers",
+}
+
+#  Reference sanity-gate tolerance: extracted span / root chord may deviate
+#  at most this relative fraction from a trusted reference planform before
+#  the extraction is declared nonsense. 20% comfortably absorbs drafting and
+#  conversion slop on a CLEAN panel while catching every realistic failure
+#  mode (full-sheet 3-views read ~2x span here; wrong units are 12x-39x off).
+_REFERENCE_REL_TOL: float = 0.20
+
 
 def _open_dxf(path: Union[str, Path]) -> "ezdxf.document.Drawing":
     """Open a DXF file, translating ezdxf/IO failures into DxfParseError.
@@ -264,8 +310,13 @@ def _open_dxf(path: Union[str, Path]) -> "ezdxf.document.Drawing":
         ) from exc
 
 
-def _insunits_scale(doc: "ezdxf.document.Drawing", path: Path) -> float:
-    """Resolve the modelspace -> meters scale factor from $INSUNITS."""
+def _insunits_scale(doc: "ezdxf.document.Drawing", path: Path) -> Tuple[int, float]:
+    """Resolve $INSUNITS to (code, modelspace -> meters scale factor).
+
+    The code travels back to the caller so the CLI can report WHICH unit
+    assumption was applied — in particular the unitless-assumed-meters case,
+    which is a silent convention everywhere except the printed summary.
+    """
     code = int(doc.header.get("$INSUNITS", 0))
     # Unknown codes (yards, miles, astronomical units...) are refused rather
     # than guessed: a wrong length scale poisons every downstream artifact.
@@ -274,7 +325,7 @@ def _insunits_scale(doc: "ezdxf.document.Drawing", path: Path) -> float:
             f"'{path}' uses unsupported $INSUNITS code {code}; re-export the "
             f"drawing in mm/cm/m/in/ft (codes 4/5/6/1/2) or unitless meters"
         )
-    return _INSUNITS_TO_M[code]
+    return code, _INSUNITS_TO_M[code]
 
 
 def _entity_points(entity: Any) -> List[Tuple[float, float]]:
@@ -302,7 +353,9 @@ def _entity_points(entity: Any) -> List[Tuple[float, float]]:
 
 
 def read_dxf_planform(
-    path: Union[str, Path], layer: Optional[str] = None
+    path: Union[str, Path],
+    layer: Optional[str] = None,
+    reference: Optional[Planform] = None,
 ) -> Planform:
     """Extract a trapezoidal planform from DXF linework.
 
@@ -315,6 +368,14 @@ def read_dxf_planform(
         When given, only entities on this layer participate (DXF layer names
         are case-insensitive, so the comparison is too). Use list_layers()
         to discover candidates interactively.
+    reference : Optional[Planform]
+        Trusted planform (normally planform_from_yaml output) arming the
+        sanity gate: extracted span or root chord deviating more than 20%
+        (_REFERENCE_REL_TOL) from the reference raises DxfParseError instead
+        of returning a plausible-looking wrong trapezoid. This is the ONLY
+        defense against the single-panel assumption being violated — e.g. a
+        full-sheet 3-view like geometry/dxf/glasair_topview.dxf trips the
+        gate by design (it reads as span 14.2 m vs the true 7.09 m).
 
     Method
     ------
@@ -331,17 +392,21 @@ def read_dxf_planform(
        spacing, so the clusters cannot swallow a neighboring station.
     4. LE sweep is recovered from the x-shift of the min-x (leading-edge)
        vertex between the two rows.
+    5. When ``reference`` is given, the result is checked against it before
+       being returned (the sanity gate described above).
 
     Raises
     ------
     DxfParseError
         When the file is unreadable, has no usable linework (the message
-        names what WAS found), has zero spanwise extent, or has a degenerate
-        root row.
+        names what WAS found), has zero spanwise extent, has a degenerate
+        root row, or fails the reference sanity gate.
     """
     p = Path(path)
     doc = _open_dxf(p)
-    scale = _insunits_scale(doc, p)
+    # Unit resolution: only the scale matters here; the code is reported by
+    # the CLI path, which calls _insunits_scale itself for the summary line.
+    _code, scale = _insunits_scale(doc, p)
     msp = doc.modelspace()
 
     # ---- pass 1: gather vertices, plus diagnostics for the failure path ----
@@ -421,14 +486,41 @@ def read_dxf_planform(
 
     # Full span doubles the drawn panel — the standard half-model 3-view
     # convention documented in the module docstring. A drawing of the FULL
-    # symmetric planform would violate this assumption; in that ambiguous
-    # case the spec mandates the YAML fallback anyway.
-    return Planform(
+    # symmetric planform (or a full-sheet 3-view) violates this assumption
+    # SILENTLY; the reference gate below is what makes that violation loud.
+    pf = Planform(
         span_m=2.0 * half_span,
         chord_root_m=chord_root,
         chord_tip_m=chord_tip,
         le_sweep_rad=le_sweep,
     )
+
+    # ---- sanity gate: extracted vs trusted reference (when armed) ----
+    # Span and root chord are the two quantities a violated single-panel
+    # assumption distorts first (sheet height doubles the span; sheet-edge
+    # rows shrink or inflate the chords). Both checked, either one trips.
+    if reference is not None:
+        span_dev = abs(pf.span_m - reference.span_m) / reference.span_m
+        root_dev = (
+            abs(pf.chord_root_m - reference.chord_root_m)
+            / reference.chord_root_m
+        )
+        if span_dev > _REFERENCE_REL_TOL or root_dev > _REFERENCE_REL_TOL:
+            raise DxfParseError(
+                f"planform extracted from '{p}' fails the reference sanity "
+                f"gate (tolerance {_REFERENCE_REL_TOL:.0%}): "
+                f"span {pf.span_m:.4f} m vs reference "
+                f"{reference.span_m:.4f} m ({span_dev:.1%} off); "
+                f"chord_root {pf.chord_root_m:.4f} m vs reference "
+                f"{reference.chord_root_m:.4f} m ({root_dev:.1%} off). "
+                f"The drawing likely violates the single-panel assumption "
+                f"(full-sheet 3-views like geometry/dxf/glasair_topview.dxf "
+                f"do, by design) or carries a wrong $INSUNITS scale. Use the "
+                f"aircraft.yaml values via planform_from_yaml, or export a "
+                f"clean root-to-tip panel DXF and retry."
+            )
+
+    return pf
 
 
 def list_layers(path: Union[str, Path]) -> List[str]:
@@ -449,14 +541,23 @@ def list_layers(path: Union[str, Path]) -> List[str]:
 #  CLI: layer discovery + planform summary for a converted drawing
 # =============================================================================
 def _main(argv: List[str]) -> int:
-    """Print layers and the extracted planform of a DXF (ASCII only)."""
+    """Print layers, units, and the extracted planform of a DXF (ASCII only).
+
+    With --yaml the reference sanity gate is armed: the planform built from
+    that aircraft.yaml bounds the extraction, and a deviation beyond 20% in
+    span or root chord aborts with an explanatory error. The committed
+    full-sheet 3-views (geometry/dxf/glasair_*.dxf) trip the gate by design
+    — they are measured by scripts/measure_dxf.py, not by this reader.
+    """
     import argparse
 
     parser = argparse.ArgumentParser(
         description=(
-            "Inspect a 3-view DXF: list layers and extract the trapezoidal "
-            "planform (x = chordwise, y = spanwise, one panel root->tip). "
-            "Note: DWG files must be converted to DXF externally first."
+            "Inspect a DXF: list layers, report the $INSUNITS scale, and "
+            "extract the trapezoidal planform (x = chordwise, y = spanwise, "
+            "one panel root->tip). DWG files must be converted to DXF "
+            "externally first. Pass --yaml to sanity-check the extraction "
+            "against aircraft.yaml (full-sheet 3-views fail this on purpose)."
         )
     )
     parser.add_argument("dxf_path", help="path to the DXF file")
@@ -465,12 +566,23 @@ def _main(argv: List[str]) -> int:
         default=None,
         help="restrict extraction to one layer (see the printed layer list)",
     )
+    parser.add_argument(
+        "--yaml",
+        dest="yaml_path",
+        default=None,
+        help=(
+            "aircraft.yaml to build the reference planform from; arms the "
+            "20%% span/root-chord sanity gate against the extraction"
+        ),
+    )
     args = parser.parse_args(argv)
 
-    # Layer inventory first — even when extraction fails this is the piece
-    # of information the user needs to fix the invocation.
+    # Layer inventory and unit resolution first — even when extraction fails
+    # these are the pieces of information the user needs to fix the
+    # invocation (wrong --layer, or a drawing exported at the wrong scale).
     try:
         layers = list_layers(args.dxf_path)
+        code, scale = _insunits_scale(_open_dxf(args.dxf_path), Path(args.dxf_path))
     except DxfParseError as exc:
         print(f"ERROR: {exc}")
         return 1
@@ -478,14 +590,52 @@ def _main(argv: List[str]) -> int:
     for name in layers:
         print(f"  {name}")
 
-    # Planform extraction with the requested filter; failures are reported
-    # verbatim (the error text already carries the remediation hints).
+    # The resolved unit assumption is printed unconditionally so a wrong
+    # $INSUNITS (or the silent unitless-means-meters convention) is visible
+    # in every run, not only when someone thinks to check the header.
+    if code == 0:
+        print(
+            f"Units: $INSUNITS 0 (unitless) -> ASSUMED meters, "
+            f"scale {scale:g} m per drawing unit"
+        )
+    else:
+        print(
+            f"Units: $INSUNITS {code} ({_INSUNITS_NAMES[code]}) -> "
+            f"scale {scale:g} m per drawing unit"
+        )
+
+    # Reference planform for the sanity gate, when requested. The units
+    # module is imported lazily (and with a flat-import fallback for the
+    # `python geometry/dxf_reader.py` script invocation, where sys.path[0]
+    # is geometry/ itself) so module import never requires it.
+    reference: Optional[Planform] = None
+    if args.yaml_path is not None:
+        try:
+            from geometry.units import load_aircraft
+        except ImportError:  # pragma: no cover - script-mode path only
+            from units import load_aircraft  # type: ignore[no-redef]
+        try:
+            reference = planform_from_yaml(load_aircraft(args.yaml_path))
+        except Exception as exc:
+            print(
+                f"ERROR: cannot build the reference planform from "
+                f"'{args.yaml_path}': {exc}"
+            )
+            return 1
+        print(
+            f"Reference (from {args.yaml_path}): span {reference.span_m:.4f} m, "
+            f"chord_root {reference.chord_root_m:.4f} m "
+            f"(sanity gate: +/-{_REFERENCE_REL_TOL:.0%})"
+        )
+
+    # Planform extraction with the requested filter and gate; failures are
+    # reported verbatim (the error text already carries remediation hints).
     try:
-        pf = read_dxf_planform(args.dxf_path, layer=args.layer)
+        pf = read_dxf_planform(args.dxf_path, layer=args.layer, reference=reference)
     except DxfParseError as exc:
         print(f"ERROR: {exc}")
         print("Falling back to aircraft.yaml values is the supported path "
-              "until a clean DXF is provided (see planform_from_yaml).")
+              "for ambiguous drawings (see planform_from_yaml).")
         return 1
 
     # Summary block. Sweep may be None in principle, though the DXF path

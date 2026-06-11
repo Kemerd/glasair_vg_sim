@@ -1,0 +1,61 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Intermittency (gamma) -- Phase-1 clean-section 2D validation case          |
+|  Langtry-Menter gamma-Re_theta transition model (kOmegaSSTLM)               |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      gammaInt;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Intermittency: 0 = laminar, 1 = fully turbulent. Langtry & Menter (AIAA J.
+// 2009, "Correlation-Based Transition Modeling...") prescribe gamma = 1 in
+// the FREESTREAM -- the freestream is not laminar boundary-layer fluid, and
+// gamma < 1 outside the BL would spuriously damp the SST production limiter.
+// Transition is triggered inside the BL by the model's own correlations, not
+// by the inlet value.
+
+dimensions      [0 0 0 0 0 0 0];
+
+internalField   uniform 1;
+
+boundaryField
+{
+    airfoil
+    {
+        // Langtry-Menter wall condition: zero NORMAL FLUX of intermittency
+        // at the wall (the published BC), letting the near-wall gamma be set
+        // by the transport equation's own source terms. A fixedValue here
+        // would pin the transition state instead of letting the correlations
+        // predict it.
+        type            zeroGradient;
+    }
+
+    farfield
+    {
+        // gamma = 1 on inflow per the model authors; free on outflow.
+        type            inletOutlet;
+        inletValue      uniform 1;
+        value           uniform 1;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 1;
+        value           uniform 1;
+    }
+
+    frontAndBack
+    {
+        // 2D empty direction.
+        type            empty;
+    }
+}
+
+// ************************************************************************* //

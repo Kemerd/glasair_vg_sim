@@ -1,0 +1,29 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  blockMeshDict PLACEHOLDER -- Phase-1 clean-section 2D validation case      |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// This template file is a deliberate stub. The real blockMeshDict is
+// GENERATED per case by scripts/build_validation_case.py, which:
+//   * resamples the LS(1)-0413 loop (geometry/ls413.dat, blunt TE),
+//   * sizes the first wall-normal cell from the y+ < 1 correlation chain
+//     in scripts/first_cell_height.py,
+//   * lays out the 5-block structured C-grid (far field 25 c, wake 25 c)
+//     with spline surface edges and growth ratio <= 1.2,
+//   * scales all counts by sqrt(2) per refinement level (--level 0|1|2).
+// Instantiating the template OVERWRITES this file with the generated mesh
+// dictionary; if you are reading this text inside cases/runs/, the build
+// step failed and the case must not be run.
+
+FatalError
+// The bare token above makes blockMesh refuse to run on the stub, so a
+// half-built case can never silently mesh an empty domain.
+
+// ************************************************************************* //
