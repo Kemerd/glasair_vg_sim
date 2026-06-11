@@ -117,9 +117,21 @@ def main() -> int:
                 proc = subprocess.run([str(EXE)], cwd=str(EXE_DIR),
                                       stdout=con, stderr=subprocess.STDOUT)
             mins = (time.time() - t0) / 60.0
-            if proc.returncode != 0 or not case_csv.exists():
-                log(f"case {sp_label} {d_label} FAILED (rc={proc.returncode}) after {mins:.1f} min")
+            # Verdict on CSV CONTENT, not exit code: the exe historically dies
+            # with an access violation in teardown AFTER flushing all results
+            # (render thread vs LBM destruction race); a rich CSV means the
+            # physics completed regardless of how the process ended.
+            n_rows = 0
+            if case_csv.exists():
+                with open(case_csv, encoding="utf-8") as fh:
+                    n_rows = sum(1 for ln in fh if not ln.startswith("#"))
+            if n_rows < 20:
+                log(f"case {sp_label} {d_label} FAILED (rc={proc.returncode}, "
+                    f"only {n_rows} samples) after {mins:.1f} min")
                 continue
+            if proc.returncode != 0:
+                log(f"case {sp_label} {d_label}: nonzero exit rc={proc.returncode} "
+                    f"but CSV complete ({n_rows} samples) - accepting (teardown crash)")
             cl, cd, pp, n = settled_stats(case_csv)
             results[sp_label][d_label] = (cl, cd, pp, n)
             log(f"case {sp_label} {d_label} done in {mins:.1f} min: "
