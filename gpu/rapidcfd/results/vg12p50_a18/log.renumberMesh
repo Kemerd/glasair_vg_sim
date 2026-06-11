@@ -1,0 +1,60 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2506                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+Build  : _d6aa836d-20260127 OPENFOAM=2506 patch=260127 version=2506
+Arch   : "LSB;label=32;scalar=64"
+Exec   : renumberMesh -overwrite
+Date   : Jun 11 2026
+Time   : 13:03:09
+Host   : EVERETT-STATION
+PID    : 7119
+I/O    : uncollated
+Case   : /home/donny-linux/glasair_rapidcfd/vg12p50_a18
+nProcs : 1
+trapFpe: Floating point exception trapping enabled (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 5, maxFileModificationPolls 20)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+Create mesh for time = 0
+
+Mesh region0 size: 2572689
+Before renumbering
+    band           : 2378365
+    profile        : 8.144007e+11
+
+Using renumber-method: CuthillMcKee [default]
+
+Reading fields
+    volScalarField: k nut omega p
+    volVectorField: U
+Reading faceSet: skewFaces
+
+After renumbering
+    band           : 32126
+    profile        : 4.607983e+10
+
+Writing mesh to "constant"
+Reading hexRef8 data : cellLevel
+Reading hexRef8 data : pointLevel
+Reading hexRef8 data : level0Edge
+
+Timings:
+    read mesh   : 5.096009
+    read fields : 0.384673
+    decompose   : 0
+    cell-cells  : 0
+    renumber    : 0.6086126
+    write       : 3.052254
+TotalTime = 10.25069 s
+
+ExecutionTime = 10.39 s  ClockTime = 11 s
+
+End
+

@@ -1,0 +1,57 @@
+/*--------------------------------*- C++ -*----------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      omega;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+dimensions      [0 0 -1 0 0 0 0];
+
+internalField   uniform 412.511;
+
+boundaryField
+{
+    inlet
+    {
+        type            fixedValue;
+        value           uniform 412.511;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 412.511;
+        value           uniform 412.511;
+    }
+
+    top
+    {
+        type            slip;
+    }
+
+    bottom
+    {
+        type            slip;
+    }
+
+    sideLeft
+    {
+        type            slip;
+    }
+
+    sideRight
+    {
+        type            slip;
+    }
+
+    wing
+    {
+        type            omegaWallFunction;
+        value           uniform 412.511;
+    }
+
+}

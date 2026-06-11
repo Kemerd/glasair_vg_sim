@@ -1,0 +1,46 @@
+/*--------------------------------*- C++ -*----------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+// Background hex box for snappy: base 0.1 m cells in x/y and a single
+// cell across the one-pitch span (snappy's refinement subdivides z too,
+// reaching sub-mm at the vane band). Sides are plain patches carrying a
+// slip BC - for the steady mean flow of a mirror-symmetric VG array this
+// is exactly the symmetry condition, without symmetryPlane's planarity
+// fussiness after snapping.
+convertToMeters 1;
+
+vertices
+(
+    (-4.5 -5.0 -0.025)  (9.5 -5.0 -0.025)
+    (9.5 5.0 -0.025)  (-4.5 5.0 -0.025)
+    (-4.5 -5.0 0.025)  (9.5 -5.0 0.025)
+    (9.5 5.0 0.025)  (-4.5 5.0 0.025)
+);
+
+blocks
+(
+    hex (0 1 2 3 4 5 6 7) (140 100 1) simpleGrading (1 1 1)
+);
+
+edges ();
+
+boundary
+(
+    inlet    { type patch; faces ((0 4 7 3)); }
+    outlet   { type patch; faces ((1 2 6 5)); }
+    top      { type patch; faces ((3 7 6 2)); }
+    bottom   { type patch; faces ((0 1 5 4)); }
+    sideLeft { type patch; faces ((0 3 2 1)); }
+    sideRight{ type patch; faces ((4 5 6 7)); }
+);
+
+mergePatchPairs ();
