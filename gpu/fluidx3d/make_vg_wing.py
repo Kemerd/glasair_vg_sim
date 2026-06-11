@@ -71,11 +71,15 @@ def make_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
 
 
 def build_vg_wing(span_m: float, h_m: float, out_path: Path,
-                  pitch_m: float | None = None) -> None:
+                  pitch_m: float | None = None,
+                  thick_m: float | None = None) -> None:
     """Wing section + counter-rotating VG row, exported as one binary STL.
 
     pitch_m overrides the aircraft.yaml pair spacing (sweep variable); None
-    keeps the Strausak outboard default from vg_defaults.
+    keeps the Strausak outboard default from vg_defaults. thick_m overrides
+    the physical plate thickness: vanes THINNER than a lattice cell voxelize
+    stochastically (grid-phase moire -- vanes vanish along the span), so
+    coarse-cell visual runs need plates >= ~1.5x the cell size.
     """
     ac = load_aircraft(REPO / "aircraft.yaml")
     chord = ac.wing.aileron.chord_at_mid_station        # 0.9022 m [DXF]
@@ -93,7 +97,7 @@ def build_vg_wing(span_m: float, h_m: float, out_path: Path,
     x_le = x_frac * chord
     y_le = y_surf * chord
     vane_l = l_per_h * h_m
-    vane_t = max(0.0015, h_m / 8.0)                    # plate thickness
+    vane_t = thick_m if thick_m else max(0.0015, h_m / 8.0)  # plate thickness
 
     vanes = []
     n_pairs = int(span_m / pitch)
@@ -128,6 +132,10 @@ def main() -> None:
                     help="extruded wing span in m (default 1.5)")
     ap.add_argument("--pitch-mm", type=float, default=0.0,
                     help="VG pair spacing in mm (0 = aircraft.yaml default, 50)")
+    ap.add_argument("--vane-thickness-mm", type=float, default=0.0,
+                    help="override plate thickness in mm (0 = physical "
+                         "default; use >= 1.5x the lattice cell size for "
+                         "coarse visual runs so vanes voxelize everywhere)")
     a = ap.parse_args()
 
     ASSETS.mkdir(parents=True, exist_ok=True)
@@ -146,12 +154,14 @@ def main() -> None:
     print(f"wrote {clean_path.name}: clean wing | watertight="
           f"{clean.is_watertight} faces={len(clean.faces)}")
 
-    # Pitch token in the filename only when overridden, so the legacy 50 mm
-    # asset names from earlier suites keep working.
+    # Pitch/thickness tokens in the filename only when overridden, so the
+    # legacy asset names from earlier suites keep working.
     ptag = f"_p{a.pitch_mm:g}mm" if a.pitch_mm > 0.0 else ""
+    ttag = f"_t{a.vane_thickness_mm:g}mm" if a.vane_thickness_mm > 0.0 else ""
     build_vg_wing(a.span_m, a.height_mm / 1000.0,
-                  ASSETS / f"wing_vg_h{a.height_mm:g}mm{ptag}{tag}.stl",
-                  pitch_m=a.pitch_mm / 1000.0 if a.pitch_mm > 0.0 else None)
+                  ASSETS / f"wing_vg_h{a.height_mm:g}mm{ptag}{ttag}{tag}.stl",
+                  pitch_m=a.pitch_mm / 1000.0 if a.pitch_mm > 0.0 else None,
+                  thick_m=a.vane_thickness_mm / 1000.0 if a.vane_thickness_mm > 0.0 else None)
 
 
 if __name__ == "__main__":

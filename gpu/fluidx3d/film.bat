@@ -18,6 +18,11 @@ if "%~1"=="" (echo aoa_deg = 14>> "%RUN%") else (echo aoa_deg = %~1>> "%RUN%")
 if "%~2"=="" (echo re = 2.2e6>> "%RUN%") else (echo re = %~2>> "%RUN%")
 if "%~3"=="" (echo t_end_si = 1.2>> "%RUN%") else (echo t_end_si = %~3>> "%RUN%")
 if "%~4"=="" (echo video_s = 10>> "%RUN%") else (echo video_s = %~4>> "%RUN%")
+rem Film standard (owner spec): INFINITE wing -- span-periodic domain scaled
+rem so the STL spans wall-to-wall and the tips are never simulated. Same
+rem machinery as the science slice mode, fed the full 1.5 m wing.
+echo mode = slice>> "%RUN%"
+echo span_m = 1.5>> "%RUN%"
 if not exist "%~dp0results\frames" mkdir "%~dp0results\frames"
 start "" /D "L:\Dev\FluidX3D" "L:\Dev\FluidX3D\bin\FluidX3D.exe"
 echo Filming run launched: auto-closes when the airflow time is up.

@@ -9,7 +9,7 @@
 # csv:     force-log path; empty disables logging. t_end_steps 0 = run forever.
 
 mode        = wing
-stl         = L:/Dev/glasair_vg_sim/gpu/fluidx3d/assets/wing_vg_h10mm.stl
+stl         = L:/Dev/glasair_vg_sim/gpu/fluidx3d/assets/wing_clean_ail_n_s1.5m.stl
 aoa_deg     = 14
 re          = 2.2e6
 vram_mb     = 6000
@@ -23,3 +23,10 @@ video_s     = 0       # >0: export a 360-deg orbit as 60fps PNG frames spanning 
 frames_dir  = L:/Dev/glasair_vg_sim/gpu/fluidx3d/results/frames/
 log_every   = 1000
 csv         = L:/Dev/glasair_vg_sim/gpu/fluidx3d/results/forces_live.csv
+
+# Analytic VG row (stamped into the lattice, not voxelized from STL):
+vg_enable   = 1
+vg_h_mm     = 10
+vg_pitch_mm = 50
+vg_t_mm     = 6     # visual thickness; physical is 1.5
+vg_beta_deg = 15

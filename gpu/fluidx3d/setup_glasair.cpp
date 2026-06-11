@@ -96,12 +96,15 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	// ################################################################## box + scaling ###################################################################
 	const bool slice = (mode=="slice");
 	// wing mode: span along x with free tips inside the box. slice mode: the
-	// strip spans the box wall-to-wall in x and the x faces stay UNFLAGGED,
-	// i.e. periodic -- an infinite VG array, the LBM analog of the RANS
-	// spanwise-periodic domain in the project spec.
+	// strip pierces BOTH periodic x faces -- the span is scaled slightly
+	// PAST the box (overhang, default 2%) so the physical tips sit outside
+	// the simulated volume entirely: an infinite wing with no edge/tip
+	// artifacts at the walls (owner-specified; exact wall-to-wall scaling
+	// left residual edge vortices).
+	const float overhang = cfgf(cfg, "span_overhang", 1.02f);
 	const float aspect_x = slice ? (si_span/si_chord) : 1.0f;
 	const uint3 lbm_N = resolution(slice ? float3(aspect_x, 2.2f, 1.2f) : float3(1.0f, 2.0f, 0.6f), (uint)vram_mb);
-	const float lbm_span  = slice ? (float)lbm_N.x : 0.55f*(float)lbm_N.x;
+	const float lbm_span  = slice ? overhang*(float)lbm_N.x : 0.55f*(float)lbm_N.x;
 	const float lbm_chord = lbm_span*(si_chord/si_span);
 	const float lbm_scale = fmaxf(lbm_span, lbm_chord);      // read_stl scales the mesh's LONGEST side to this
 	LBM lbm(lbm_N, units.nu_from_Re(lbm_Re, lbm_chord, lbm_u));
@@ -123,7 +126,68 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	mesh->rotate(float3x3(float3(1, 0, 0), radians(-aoa_deg)));  // pitch LE up by the angle of attack
 	mesh->translate(float3(0.0f, -0.15f*lbm.size().y, 0.0f));    // park upstream so the wake can develop
 	lbm.voxelize_mesh_on_device(mesh, TYPE_S|TYPE_X);            // TYPE_X marks the wing for object_force()
+	// ---------------------------------------------------------------------
+	// Analytic VG stamping. The STL voxelizer parity-counts along the SPAN
+	// (its minimum-cross-section heuristic) and one grazing miss on a thin
+	// vane plate erases every vane after it (owner-observed half-row bug).
+	// Vanes are therefore stamped directly into the lattice from their
+	// parametric definition: exact at any resolution, immune to parity, and
+	// VG sweeps become pure config changes (no STL regeneration).
+	// Frame bookkeeping: the wing mesh is bbox-centered at lbm.center(),
+	// parked 0.15*Ny upstream, and pitched -aoa about the span axis; cells
+	// are tested in the un-pitched wing frame (chord +y, up +z, span +x).
+	const bool vg_on   = cfgf(cfg, "vg_enable", 0.0f)!=0.0f;
+	const float vg_h   = cfgf(cfg, "vg_h_mm", 10.0f)/1000.0f/si_chord*lbm_chord;   // vane height, lattice units
+	const float vg_p   = cfgf(cfg, "vg_pitch_mm", 50.0f)/1000.0f/si_chord*lbm_chord;
+	const float vg_t   = cfgf(cfg, "vg_t_mm", 6.0f)/1000.0f/si_chord*lbm_chord;    // plate thickness (6 mm visual default)
+	const float vg_l   = cfgf(cfg, "vg_l_per_h", 3.0f)*vg_h;
+	const float vg_b   = radians(cfgf(cfg, "vg_beta_deg", 15.0f));
+	const float z_skin = cfgf(cfg, "vg_skin_off_frac", 0.03149f)*lbm_chord;  // upper skin at 7%c vs mesh bbox center
+	const float y_row  = cfgf(cfg, "vg_le_off_frac", -0.43f)*lbm_chord;      // row LE vs mesh bbox center (chordwise)
+	const float ar     = radians(-aoa_deg);                      // pitch rotation the mesh received
+	const float3 wc    = lbm.center()+float3(0.0f, -0.15f*lbm.size().y, 0.0f); // wing bbox center in the box
+	// Speck (coherence breaker): ONE small bump stamped at mid-span, 30%c --
+	// breaks the artificial spanwise-roller coherence of the quasi-2D domain
+	// so the visible flow behaves like honest 3D air (user-validated method).
+	const bool speck_on  = cfgf(cfg, "speck_enable", 0.0f)!=0.0f;
+	const float sp_h     = cfgf(cfg, "speck_h_mm", 8.0f)/1000.0f/si_chord*lbm_chord;
+	const float sp_l     = cfgf(cfg, "speck_l_mm", 8.0f)/1000.0f/si_chord*lbm_chord;
+	const float sp_w     = cfgf(cfg, "speck_w_mm", 3.0f)/1000.0f/si_chord*lbm_chord;
+	const float sp_skin  = cfgf(cfg, "speck_skin_off_frac", 0.06208f)*lbm_chord; // upper skin at 30%c vs bbox center
+	const float sp_le    = cfgf(cfg, "speck_le_off_frac", -0.20f)*lbm_chord;
 	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz(); parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
+		if(speck_on&&lbm.flags[n]==0u) {                         // stamp the mid-span speck
+			const float dx=(float)x-wc.x, dy=(float)y-wc.y, dz=(float)z-wc.z;
+			const float yw =  dy*cos(ar)+dz*sin(ar);
+			const float zw = -dy*sin(ar)+dz*cos(ar);
+			// Minimum one-cell footprint in every direction: a physically
+			// thin solid must never fall between lattice cell centers and
+			// silently vanish (the sub-voxel dropout class of bug).
+			const float w2 = fmax(0.5f*sp_w, 0.75f);
+			const float l2 = fmax(sp_l, 1.5f), h2 = fmax(sp_h, 1.5f);
+			if(fabs(dx)<w2&&zw>sp_skin-1.5f&&zw<sp_skin+h2
+			   &&yw>sp_le&&yw<sp_le+l2) lbm.flags[n] = TYPE_S|TYPE_X;
+		}
+		if(vg_on&&lbm.flags[n]==0u) {                            // stamp vanes into still-fluid cells
+			const float dx=(float)x-wc.x, dy=(float)y-wc.y, dz=(float)z-wc.z;
+			const float yw =  dy*cos(ar)+dz*sin(ar);             // un-pitch into the wing frame
+			const float zw = -dy*sin(ar)+dz*cos(ar);
+			if(zw>z_skin-1.5f&&zw<z_skin+vg_h) {                 // vertical band: skin (with sink) to vane tip
+				const float dyv = yw-y_row;                      // chordwise distance from the row leading edge
+				if(dyv>-vg_t&&dyv<vg_l+vg_t) {
+					const float ul = fmod(fmod(dx, vg_p)+vg_p, vg_p); // span position inside the local pair cell
+					for(int side=0; side<2; side++) {            // two toe-out plates per pair
+						const float sgn = side==0 ? 1.0f : -1.0f;
+						const float du = ul-(side==0 ? 0.25f : 0.75f)*vg_p;
+						const float along  = du*sin(sgn*vg_b)+dyv*cos(vg_b); // plate-frame coordinates
+						const float across = du*cos(vg_b)-dyv*sin(sgn*vg_b);
+						// Same one-cell floor as the speck: physical 1.5 mm
+						// plates must still exist on a coarse visual lattice.
+						if(along>=0.0f&&along<=vg_l&&fabs(across)<=fmax(0.5f*vg_t, 0.75f)) { lbm.flags[n] = TYPE_S|TYPE_X; break; }
+					}
+				}
+			}
+		}
 		if(lbm.flags[n]!=(TYPE_S|TYPE_X)&&lbm.flags[n]!=TYPE_S) lbm.u.y[n] = lbm_u;
 		const bool xwall = (x==0u||x==Nx-1u) && !slice;          // slice mode: x faces stay periodic (infinite VG array)
 		if(xwall||y==0u||y==Ny-1u||z==0u||z==Nz-1u) lbm.flags[n] = TYPE_E;
@@ -159,11 +223,16 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 		           +to_string(F.z, 6u)+","+to_string(Cd, 6u)+","+to_string(Cl, 6u)+"\n");
 	};
 	if(film) {                                                   // filming run: single-step so the frame pacer can fire precisely
-		print_info("filming: "+to_string(total_frames)+" frames (360 deg orbit, "+to_string(video_s, 1u)+" s at 60 fps) -> "+frames_dir);
+		// No scripted orbit: the built-in camera autorotation provides the
+		// rotation (scripting the azimuth here FIGHTS autorotation and shows
+		// up as a rotate-snap-rotate glitch -- owner-diagnosed). Film mode
+		// just ensures autorotation is on and saves the paced frames.
+#ifdef INTERACTIVE_GRAPHICS
+		camera.autorotation = true;
+#endif // INTERACTIVE_GRAPHICS
+		print_info("filming: "+to_string(total_frames)+" frames ("+to_string(video_s, 1u)+" s at 60 fps, built-in autorotation) -> "+frames_dir);
 		while(lbm.get_t()<t_end) {
 			if(lbm.graphics.next_frame(t_end, video_s)) {        // true when it is time to capture the next video frame
-				const float rx = 360.0f*(float)frame/(float)total_frames;   // full orbit over the clip
-				lbm.graphics.set_camera_centered(rx, cam_ry, cam_fov, cam_zoom); // orbit azimuth at the configured elevation/zoom
 				lbm.graphics.write_frame(frames_dir);
 				frame++;
 			}
