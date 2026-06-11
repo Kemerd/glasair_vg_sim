@@ -952,7 +952,8 @@ def mesh_summary(plan: MeshPlan) -> str:
         f"first = TE spacing",
         f"blunt-TE base        : {plan.n_base} cells across "
         f"{2.0 * plan.base.length:.4g} m, symmetric two-zone grading, "
-        f"corner cells = h1, ratio {plan.base.ratio:.4f} (cap {GROWTH_CAP})",
+        f"corner cell {plan.base.first * 1000.0:.3g} mm (floored, "
+        f"stability), ratio {plan.base.ratio:.4f} (cap {GROWTH_CAP})",
         f"total cells          : {plan.n_cells_total}",
     ]
     return "\n".join(lines)

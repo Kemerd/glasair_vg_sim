@@ -1,0 +1,81 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Wall shear stress + surface dump -- Phase-1 clean-section 2D validation    |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+
+// Data producer for the transition gate (spec Phase-1 item 4c): the RANS
+// transition pickup needs the wall-Cf distribution Cf(x/c) on the suction
+// surface, and Cf comes from the wall shear stress. Two cooperating function
+// objects, declared in execution order (OpenFOAM runs them in dictionary
+// insertion order, so wallShearStress1 registers its field BEFORE wallCf
+// samples it):
+//
+//   wallShearStress1  computes the wallShearStress patch field on the
+//                     airfoil wall. simpleFoam is incompressible, so the
+//                     field is KINEMATIC shear stress tau_w/rho [m^2/s^2]
+//                     -- the rho convention every consumer must honor
+//                     (scripts/extract_cf.py divides by 0.5*U_inf^2 only;
+//                     rho cancels against the kinematic dynamic pressure).
+//   wallCf            writes that field at every airfoil face centre as a
+//                     raw-format surface dump under
+//                     postProcessing/wallCf/<time>/, which
+//                     scripts/extract_cf.py converts into the suction-side
+//                     cf_upper.csv consumed by the gate's transition
+//                     detector (validation/compare_gate.py).
+//
+// Both run onEnd only: Cf from a half-converged state would feed garbage
+// into the transition comparison, and the orchestrator only post-processes
+// converged cases anyway.
+
+wallShearStress1
+{
+    type            wallShearStress;
+    libs            (fieldFunctionObjects);
+
+    // Restrict to the viscous wall; evaluating freestream patches would be
+    // meaningless and the log min/max should describe the airfoil only.
+    patches         (airfoil);
+
+    // Compute once from the converged end state (see header note); the
+    // execute step is what registers the field for wallCf below.
+    executeControl  onEnd;
+    writeControl    onEnd;
+}
+
+wallCf
+{
+    type            surfaces;
+    libs            (sampling);
+
+    // Same onEnd discipline; declared after wallShearStress1 so the field
+    // is registered when this writer runs.
+    executeControl  onEnd;
+    writeControl    onEnd;
+
+    // raw = '#'-commented whitespace columns (x y z f_x f_y f_z), the same
+    // trivially-parseable family as the BL sample sets; the column layout
+    // is part of the cross-script contract with scripts/extract_cf.py.
+    surfaceFormat   raw;
+
+    // Face-centre values, NOT point-interpolated: the wall shear is exact
+    // per wall face, and interpolation would smear the transition front the
+    // whole exercise is trying to locate.
+    interpolate     false;
+
+    fields          (wallShearStress);
+
+    surfaces
+    (
+        airfoilSurface
+        {
+            // The wall patch verbatim (upper + lower surface + blunt base;
+            // extract_cf filters to the suction side downstream).
+            type        patch;
+            patches     (airfoil);
+            triangulate false;
+        }
+    );
+}
+
+// ************************************************************************* //

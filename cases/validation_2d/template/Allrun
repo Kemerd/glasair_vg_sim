@@ -13,14 +13,26 @@ cd "$(dirname "$0")"
 if [ -z "$WM_PROJECT" ]; then
     OF_BASHRC="/usr/lib/openfoam/openfoam2506/etc/bashrc"
     if [ -f "$OF_BASHRC" ]; then
+        # The ESI environment script trips a benign bash scope error
+        # ('pop_var_context: head of shell_variables not a function
+        # context') when sourced from a non-interactive script under
+        # set -e; the environment it builds is complete regardless, so
+        # swallow the noise and VERIFY the toolchain below instead of
+        # trusting the source's exit status.
         # shellcheck disable=SC1090
-        . "$OF_BASHRC"
+        . "$OF_BASHRC" 2>/dev/null || true
     else
         echo "Allrun: no OpenFOAM environment active and $OF_BASHRC not found."
         echo "Allrun: install ESI OpenFOAM v2506 (apt package openfoam2506) in WSL2,"
         echo "Allrun: or source its etc/bashrc first. Case files are ready to run."
         exit 1
     fi
+fi
+# Hard verification: the sourcing above is allowed to grumble, but a missing
+# solver toolchain must stop the run with a message, not a cryptic 127.
+if ! command -v blockMesh > /dev/null 2>&1; then
+    echo "Allrun: OpenFOAM environment did not come up (blockMesh not on PATH)."
+    exit 1
 fi
 
 # Mesh, then verify it. checkMesh exits 0 even when checks FAIL (its exit

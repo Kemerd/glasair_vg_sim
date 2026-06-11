@@ -1,0 +1,119 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  fvSolution -- pimpleFoam pseudo-transient VARIANT (post-stall fallback)    |
+|  Lives in pimple_overrides/; copied over system/fvSolution by               |
+|  scripts/run_validation.py when a post-stall case refuses to converge      |
+|  steady. Identical to the base dictionary except where commented.           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvSolution;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+solvers
+{
+    p
+    {
+        // GAMG: the pressure Poisson system on a graded C-grid spans ~6
+        // orders of magnitude in cell size; multigrid is the only solver
+        // that stays cheap across that range.
+        solver          GAMG;
+        smoother        GaussSeidel;
+        tolerance       1e-08;
+        relTol          0.01;
+    }
+
+    // VARIANT: pimpleFoam requires Final-iteration entries; the last outer
+    // corrector solves to the absolute tolerance (relTol 0) so each pseudo-
+    // time step ends on a properly converged linear system.
+    pFinal
+    {
+        solver          GAMG;
+        smoother        GaussSeidel;
+        tolerance       1e-08;
+        relTol          0;
+    }
+
+    U
+    {
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-09;
+        relTol          0.01;
+    }
+
+    // Turbulence and transition scalars share one segregated setup; the
+    // tight absolute tolerance matters late in the run when the transition
+    // front is creeping toward its converged station.
+    "(k|omega|gammaInt|ReThetat)"
+    {
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-09;
+        relTol          0.01;
+    }
+
+    // VARIANT: Final-iteration counterparts for every transported field.
+    "(U|k|omega|gammaInt|ReThetat)Final"
+    {
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-09;
+        relTol          0;
+    }
+}
+
+// VARIANT: PIMPLE block replaces the SIMPLE block. Convergence of a
+// pseudo-transient run is judged downstream on the SAME force-flatness
+// criterion as the steady gate (scripts/parse_forces.py); residual levels
+// under local time stepping are recorded but are not comparable to the
+// steady residualControl thresholds, so no residual-based early stop here.
+PIMPLE
+{
+    // Two outer correctors per pseudo-time step settle the stiff
+    // transition-model sources; one pressure corrector is enough at these
+    // pseudo-CFL numbers.
+    nOuterCorrectors         2;
+    nCorrectors              1;
+
+    // Same non-orthogonality coverage as the steady run (nose cut and
+    // blunt-base corner blocks).
+    nNonOrthogonalCorrectors 1;
+
+    // Local-pseudo-time ramp control (rDeltaT): cap the cell Courant number
+    // at 5, smooth the rDeltaT field so neighbouring cells cannot disagree
+    // wildly, and damp how fast rDeltaT may RISE between steps so the ramp
+    // toward the converged state stays monotone.
+    maxCo                    5;
+    rDeltaTSmoothingCoeff    0.05;
+    rDeltaTDampingCoeff      0.5;
+    maxDeltaT                1;
+}
+
+relaxationFactors
+{
+    fields
+    {
+        // Classic SIMPLE pairing 0.3/0.7 kept: pimpleFoam reads these for
+        // its outer correctors, and the transition model's source terms
+        // respond badly to aggressive pressure updates near stall.
+        p               0.3;
+    }
+    equations
+    {
+        U               0.7;
+        "(k|omega)"     0.7;
+        // Slightly tighter relaxation on the transition pair: their source
+        // terms are stiff around the transition front and over-relaxation
+        // makes the front oscillate instead of settling.
+        "(gammaInt|ReThetat)" 0.6;
+        // VARIANT: final outer corrector runs unrelaxed so the converged
+        // pseudo-time step satisfies the unrelaxed equations.
+        "(U|k|omega|gammaInt|ReThetat)Final" 1.0;
+    }
+}
+
+// ************************************************************************* //

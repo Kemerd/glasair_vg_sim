@@ -41,6 +41,7 @@ import pytest
 from geometry.airfoil import load_airfoil, resample_airfoil
 from geometry.units import load_aircraft
 from scripts.build_validation_case import (
+    BASE_EDGE_DIVISOR,
     BETA_STAR,
     BL_INNER_D99_FACTOR,
     BL_INNER_SPACING,
@@ -233,17 +234,22 @@ class TestCGridGenerator:
 # -----------------------------------------------------------------------------
 #  Blunt-base slab grading (W_m transverse direction)
 # -----------------------------------------------------------------------------
-#  Regression for the wake-slab discontinuity: a uniform run across the
-#  0.0055c base met the W_u/W_l y+ = 1 first cell with a 57x (Re 1.5M) to
-#  218x (Re 6M) wall-normal size jump on the shared wake-cut faces. The
-#  symmetric two-zone grading must land the edge cell ON h1 (within 5%)
-#  with the cell-to-cell ratio capped at 1.2 -- at EVERY (Re, level) combo
-#  of the sweep, since both h1 and the level scaling move the solve.
+#  Regression for the wake-slab corner treatment. History: a uniform run
+#  across the 0.0055c base met the W_u/W_l y+ = 1 first cell with a 57x..
+#  218x size jump (review finding); the first fix matched the corner edge
+#  cell to h1 exactly, which DIVERGED the steady solver on real runs (the
+#  h1-matched edge follows the whole 25c wake -> O(1e5) aspect ratios and
+#  resolved blunt-TE vortex shedding that steady SIMPLE cannot damp). The
+#  production rule is therefore a FLOORED edge:
+#      edge = max(h1, base_height / (BASE_EDGE_DIVISOR * level_scale))
+#  with the cell-to-cell ratio still capped at 1.2 -- audited at EVERY
+#  (Re, level) combo of the sweep, since h1, the floor, and the level
+#  scaling all move the solve.
 
 class TestBaseSlabGrading:
     @pytest.mark.parametrize("re_t", [1.5e6, 3.0e6, 6.0e6])
     @pytest.mark.parametrize("level", [0, 1, 2])
-    def test_edge_cell_matches_h1_within_5pct_and_cap(self, atmo, base_h,
+    def test_edge_cell_matches_floored_target_and_cap(self, atmo, base_h,
                                                       re_t, level):
         plan = plan_cgrid(re_t, atmo["nu"], atmo["rho"], atmo["T"], level,
                           base_height=base_h)
@@ -257,17 +263,25 @@ class TestBaseSlabGrading:
             h_edge = b.length * (b.ratio - 1.0) / (b.ratio ** b.n - 1.0)
         else:
             h_edge = b.length / b.n
-        assert h_edge == pytest.approx(plan.h1, rel=0.05)
+        # Production rule: the floored target, never bare h1 (stability).
+        level_scale = math.sqrt(2.0) ** level
+        target = max(plan.h1, base_h / (BASE_EDGE_DIVISOR * level_scale))
+        assert h_edge == pytest.approx(target, rel=0.05)
+        # The floor must actually bind across this sweep's whole (Re, level)
+        # envelope -- if h1 ever exceeds it the stability rationale needs
+        # rethinking, so surface that loudly here.
+        assert target > plan.h1
         # Symmetric halves: the rendered total is exactly two half-runs.
         assert plan.n_base == 2 * b.n
         assert b.length == pytest.approx(0.5 * base_h, rel=1e-12)
 
     def test_reference_cell_budget(self, atmo, base_h):
-        # The documented budget point: ~46 cells across the base at the
-        # reference condition (Re 3M, level 0) -- a ~+7% whole-mesh cost.
+        # Budget point with the floored edge: ~10 cells across the base at
+        # the reference condition (Re 3M, level 0) -- a ~+2% whole-mesh cost
+        # versus the pre-review uniform slab.
         plan = plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], 0,
                           base_height=base_h)
-        assert 40 <= plan.n_base <= 52
+        assert 8 <= plan.n_base <= 16
 
     def test_mismatched_base_height_is_rejected(self, coords, atmo, base_h):
         # generate_blockmeshdict must refuse a plan solved for a different

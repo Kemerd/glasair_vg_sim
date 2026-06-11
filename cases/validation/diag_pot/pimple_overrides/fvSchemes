@@ -1,0 +1,91 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  fvSchemes -- pimpleFoam pseudo-transient VARIANT (post-stall fallback)     |
+|  Lives in pimple_overrides/; copied over system/fvSchemes by                |
+|  scripts/run_validation.py when a post-stall case refuses to converge      |
+|  steady. Identical to the base dictionary except where commented.           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvSchemes;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+ddtSchemes
+{
+    // VARIANT (the single scheme change of the fallback): local pseudo-time
+    // Euler stepping instead of steadyState. Every cell marches at its own
+    // stable pseudo time step (rDeltaT controls in the fvSolution PIMPLE
+    // block), which damps the post-stall shedding modes a global steady
+    // iteration cannot.
+    default         localEuler;
+}
+
+gradSchemes
+{
+    // Default gradient is UNLIMITED Gauss linear: the transition-model
+    // scalars (gammaInt/ReThetat, plus k/omega feeding their correlations)
+    // keep full second-order gradients where the transition front lives --
+    // a blanket cellLimited default was found to be needless dissipation on
+    // exactly the fields this phase is validated on. grad(U) alone stays
+    // cellLimited: it feeds linearUpwind reconstruction and the production
+    // terms, and the few skewed cells the transfinite C-blocks produce
+    // around the nose are where velocity-gradient ringing actually starts.
+    // (Mirrors the base dictionary; the variant changes ddtSchemes only.)
+    default         Gauss linear;
+    grad(U)         cellLimited Gauss linear 1;
+}
+
+divSchemes
+{
+    // No silent defaults: every transported quantity is listed so a model
+    // change cannot pick up an unintended scheme.
+    default         none;
+
+    // Momentum: second-order upwind-biased -- the standard accuracy/
+    // robustness point for steady external aero polars.
+    div(phi,U)      bounded Gauss linearUpwind grad(U);
+
+    // Turbulence + transition scalars: limitedLinear (2nd order, TVD-
+    // limited) rather than plain upwind. Transition location is the
+    // quantity this whole phase is validated on, and first-order smearing
+    // of gammaInt/ReThetat shifts it; the limiter supplies the necessary
+    // boundedness near the transition front instead.
+    div(phi,k)        bounded Gauss limitedLinear 1;
+    div(phi,omega)    bounded Gauss limitedLinear 1;
+    div(phi,gammaInt) bounded Gauss limitedLinear 1;
+    div(phi,ReThetat) bounded Gauss limitedLinear 1;
+
+    // Viscous stress divergence term assembled by the solver.
+    div((nuEff*dev2(T(grad(U))))) Gauss linear;
+}
+
+laplacianSchemes
+{
+    // 'corrected' = explicit non-orthogonal correction; the C-grid is close
+    // to orthogonal in the BL but earns its correction near the nose cut
+    // and the blunt-base corner blocks.
+    default         Gauss linear corrected;
+}
+
+interpolationSchemes
+{
+    default         linear;
+}
+
+snGradSchemes
+{
+    default         corrected;
+}
+
+wallDist
+{
+    // kOmegaSSTLM needs wall distance (both SST blending and the transition
+    // correlations); meshWave is exact enough on a body-fitted single-wall
+    // domain and costs one sweep at startup.
+    method          meshWave;
+}
+
+// ************************************************************************* //
