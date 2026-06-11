@@ -18,6 +18,8 @@ if not "%~2"=="" echo re = %~2>> "%RUN%"
 if not "%~3"=="" echo mode = %~3>> "%RUN%"
 if not "%~4"=="" echo stl = %~4>> "%RUN%"
 if not exist "%~dp0results" mkdir "%~dp0results"
-start "" /D "L:\Dev\FluidX3D" "L:\Dev\FluidX3D\bin\FluidX3D.exe" "%RUN%"
+rem No arguments to the exe: FluidX3D parses argv as GPU device IDs, so the
+rem setup reads the fixed tunnel_run.txt path written above instead.
+start "" /D "L:\Dev\FluidX3D" "L:\Dev\FluidX3D\bin\FluidX3D.exe"
 echo Tunnel launched (config: %RUN%)
 endlocal

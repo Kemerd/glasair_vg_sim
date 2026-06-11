@@ -131,13 +131,16 @@ def main() -> None:
     ac = load_aircraft(REPO / "aircraft.yaml")
     clean = extrude_section(ac_coords, ac.wing.aileron.chord_at_mid_station,
                             a.span_m)
-    clean_path = ASSETS / "wing_a0_binary.stl"
+    # Span suffix keeps slice-mode (0.25 m) assets from clobbering the 1.5 m
+    # wing-mode ones; the legacy names stay for the default 1.5 m span.
+    tag = "" if abs(a.span_m - 1.5) < 1e-9 else f"_s{a.span_m:g}m"
+    clean_path = ASSETS / f"wing_a0_binary{tag}.stl"
     clean.export(clean_path)
     print(f"wrote {clean_path.name}: clean wing | watertight="
           f"{clean.is_watertight} faces={len(clean.faces)}")
 
     build_vg_wing(a.span_m, a.height_mm / 1000.0,
-                  ASSETS / f"wing_vg_h{a.height_mm:g}mm.stl")
+                  ASSETS / f"wing_vg_h{a.height_mm:g}mm{tag}.stl")
 
 
 if __name__ == "__main__":

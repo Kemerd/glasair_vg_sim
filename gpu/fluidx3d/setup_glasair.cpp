@@ -71,8 +71,14 @@ static std::string cfgs(std::map<std::string, std::string>& c, const std::string
 
 void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-measured chord)
 	// ################################################################## configuration ###################################################################
-	std::map<std::string, std::string> cfg =
-		read_config(main_arguments.size()>0u ? main_arguments[0] : "L:/Dev/glasair_vg_sim/gpu/fluidx3d/tunnel_config.txt");
+	// NOTE: FluidX3D's stock main() interprets command-line arguments as GPU
+	// device IDs, so the config location is fixed instead of argument-passed:
+	// tunnel.bat writes per-run overrides to tunnel_run.txt; a bare
+	// double-click of the exe falls back to the editable tunnel_config.txt.
+	std::string cfg_path = "L:/Dev/glasair_vg_sim/gpu/fluidx3d/tunnel_run.txt";
+	if(!std::ifstream(cfg_path).good()) cfg_path = "L:/Dev/glasair_vg_sim/gpu/fluidx3d/tunnel_config.txt";
+	std::map<std::string, std::string> cfg = read_config(cfg_path);
+	print_info("config: "+cfg_path);
 	const std::string stl_path = cfgs(cfg, "stl", "L:/Dev/glasair_vg_sim/gpu/fluidx3d/assets/wing_a0_binary.stl");
 	const std::string mode    = cfgs(cfg, "mode", "wing");   // wing = whole section + tips | slice = narrow high-res strip, span-periodic
 	const std::string csv     = cfgs(cfg, "csv", "");        // force log path; empty = no CSV
@@ -82,8 +88,11 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	const float lbm_u    = cfgf(cfg, "u", 0.10f);            // lattice inflow speed (keep ~0.05..0.12 for stability)
 	const float si_span  = cfgf(cfg, "span_m", 1.5f);        // STL true span in meters
 	const float si_chord = cfgf(cfg, "chord_m", 0.9022f);    // STL true chord in meters [DXF measured]
-	const ulong t_end    = (ulong)cfgf(cfg, "t_end_steps", 0.0f);   // 0 = run forever (interactive)
 	const ulong log_every= (ulong)cfgf(cfg, "log_every", 1000.0f);
+	const float t_end_si = cfgf(cfg, "t_end_si", 0.0f);      // seconds of PHYSICAL airflow to simulate; 0 = ignore
+	const float video_s  = cfgf(cfg, "video_s", 0.0f);       // export a 360-deg orbit as PNG frames spanning this many seconds of 60 fps video; 0 = off
+	const std::string frames_dir = cfgs(cfg, "frames_dir", "L:/Dev/glasair_vg_sim/gpu/fluidx3d/results/frames/");
+	ulong t_end = (ulong)cfgf(cfg, "t_end_steps", 0.0f);     // 0 = run forever (interactive)
 	// ################################################################## box + scaling ###################################################################
 	const bool slice = (mode=="slice");
 	// wing mode: span along x with free tips inside the box. slice mode: the
@@ -96,8 +105,17 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	const float lbm_chord = lbm_span*(si_chord/si_span);
 	const float lbm_scale = fmaxf(lbm_span, lbm_chord);      // read_stl scales the mesh's LONGEST side to this
 	LBM lbm(lbm_N, units.nu_from_Re(lbm_Re, lbm_chord, lbm_u));
+	// Physical-time bookkeeping: one lattice step represents dt_si seconds of
+	// real airflow (u_lat maps onto the Re-implied physical airspeed at the
+	// true chord). Lets the config say "simulate 1.2 seconds of air" directly.
+	const float u_si  = lbm_Re*1.4607e-5f/si_chord;          // physical airspeed implied by Re at this chord, ISA sea level
+	const float dt_si = lbm_u*(si_chord/lbm_chord)/u_si;     // seconds of physics per lattice step
+	if(t_end_si>0.0f) t_end = (ulong)(t_end_si/dt_si);
 	print_info("VG tunnel: mode="+mode+", aoa="+to_string(aoa_deg, 1u)+" deg, Re="+to_string(lbm_Re)
 	           +", chord="+to_string(lbm_chord, 1u)+" cells ("+to_string(si_chord/lbm_chord*1000.0f, 2u)+" mm/cell)");
+	print_info("physics: V = "+to_string(u_si, 1u)+" m/s ("+to_string(u_si*2.23694f, 1u)+" mph), dt = "
+	           +to_string(dt_si*1.0e6f, 2u)+" us/step"+(t_end>0ull ? ", auto-close after "+to_string(t_end)+" steps = "
+	           +to_string(t_end_si, 2u)+" s of airflow" : ", running until closed"));
 	// ################################################################## geometry ###################################################################
 	// STL frame: x=chord, y=thickness, z=span. LBM frame: flow +y, up +z, span +x.
 	Mesh* mesh = read_stl(stl_path, lbm.size(), lbm.center(), float3x3(float3(1, 0, 0), radians(90.0f)), lbm_scale);
@@ -111,23 +129,56 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 		if(xwall||y==0u||y==Ny-1u||z==0u||z==Nz-1u) lbm.flags[n] = TYPE_E;
 	}); // ################################################################## run + measure ###################################################################
 	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE|VIS_Q_CRITERION;
+	// Startup camera framing (owner request): 2x zoom, 35 deg elevation looking
+	// down onto the wing's upper surface. All four knobs live in the config;
+	// mouse/keys still take over live, and the film orbit reuses zoom/elevation.
+	const float cam_zoom = cfgf(cfg, "cam_zoom", 2.0f);          // bigger = closer (1.0 = stock framing)
+	const float cam_ry   = cfgf(cfg, "cam_ry", 35.0f);           // elevation: positive looks down on the wing top
+	const float cam_rx   = cfgf(cfg, "cam_rx", 0.0f);            // initial azimuth (autorotation sweeps this)
+	const float cam_fov  = cfgf(cfg, "cam_fov", 60.0f);          // field of view
+	lbm.graphics.set_camera_centered(cam_rx, cam_ry, cam_fov, cam_zoom);
+#ifdef INTERACTIVE_GRAPHICS
+	key_P = true;                                                // auto-start: skip the press-P-to-run pause (P still toggles)
+	if(cfgf(cfg, "autorotate", 0.0f)!=0.0f) camera.autorotation = true; // optional: launch with the built-in R-key autorotation already on
+#endif // INTERACTIVE_GRAPHICS
 	const float A_ref = lbm_chord*lbm_span;                      // planform reference area in lattice units
 	const float q_ref = 0.5f*lbm_u*lbm_u;                        // lattice dynamic pressure (rho = 1)
 	if(!csv.empty()) write_file(csv, "# Glasair VG tunnel force log | mode="+mode+" stl="+stl_path
 		+" aoa_deg="+to_string(aoa_deg, 1u)+" Re="+to_string(lbm_Re)+" mm_per_cell="+to_string(si_chord/lbm_chord*1000.0f, 3u)
 		+"\n# t,Fx,Fy,Fz,Cd,Cl\n");
 	lbm.run(0u);                                                 // initialize
-	while(t_end==0ull||lbm.get_t()<t_end) {                      // measurement loop (Ahmed-body idiom)
-		lbm.run(log_every, t_end);
-		if(!csv.empty()) {
-			const float3 F = lbm.object_force(TYPE_S|TYPE_X);    // integrated lattice force on the wing
-			const float Cd = F.y/(q_ref*A_ref);                  // streamwise (+y = flow) -> drag coefficient
-			const float Cl = F.z/(q_ref*A_ref);                  // vertical (+z) -> lift coefficient
-			write_line(csv, to_string(lbm.get_t())+","+to_string(F.x, 6u)+","+to_string(F.y, 6u)+","
-			           +to_string(F.z, 6u)+","+to_string(Cd, 6u)+","+to_string(Cl, 6u)+"\n");
+	const bool film = video_s>0.0f && t_end>0ull;                // orbit export needs a finite end time to pace frames against
+	uint frame = 0u;
+	const uint total_frames = max(1u, (uint)(60.0f*video_s));    // 60 fps video
+	auto log_forces = [&]() {
+		if(csv.empty()) return;
+		const float3 F = lbm.object_force(TYPE_S|TYPE_X);        // integrated lattice force on the wing
+		const float Cd = F.y/(q_ref*A_ref);                      // streamwise (+y = flow) -> drag coefficient
+		const float Cl = F.z/(q_ref*A_ref);                      // vertical (+z) -> lift coefficient
+		write_line(csv, to_string(lbm.get_t())+","+to_string(F.x, 6u)+","+to_string(F.y, 6u)+","
+		           +to_string(F.z, 6u)+","+to_string(Cd, 6u)+","+to_string(Cl, 6u)+"\n");
+	};
+	if(film) {                                                   // filming run: single-step so the frame pacer can fire precisely
+		print_info("filming: "+to_string(total_frames)+" frames (360 deg orbit, "+to_string(video_s, 1u)+" s at 60 fps) -> "+frames_dir);
+		while(lbm.get_t()<t_end) {
+			if(lbm.graphics.next_frame(t_end, video_s)) {        // true when it is time to capture the next video frame
+				const float rx = 360.0f*(float)frame/(float)total_frames;   // full orbit over the clip
+				lbm.graphics.set_camera_centered(rx, cam_ry, cam_fov, cam_zoom); // orbit azimuth at the configured elevation/zoom
+				lbm.graphics.write_frame(frames_dir);
+				frame++;
+			}
+			lbm.run(1u, t_end);
+			if(lbm.get_t()%log_every==0ull) log_forces();
+		}
+	} else {                                                     // measurement run (Ahmed-body idiom): chunked stepping
+		while(t_end==0ull||lbm.get_t()<t_end) {
+			lbm.run(log_every, t_end);
+			log_forces();
 		}
 	}
 	lbm.write_status();
+	if(t_end>0ull) print_info("run complete: "+to_string(t_end_si, 2u)+" s of physical airflow simulated"
+	                          +(film ? ", "+to_string(frame)+" frames written" : "")+". Closing.");
 } /**/
 #endif // !BENCHMARK
 
