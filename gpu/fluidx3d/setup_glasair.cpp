@@ -39,6 +39,7 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #include <fstream>
 #include <sstream>
 #include <map>
+#include <atomic>
 // Glasair III VG study tunnel -- config-file driven so AoA / Re / geometry /
 // domain mode change WITHOUT recompiling. Config format: "key=value" lines,
 // '#' comments, at L:/Dev/glasair_vg_sim/gpu/fluidx3d/tunnel_config.txt
@@ -155,6 +156,51 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	const float sp_w     = cfgf(cfg, "speck_w_mm", 3.0f)/1000.0f/si_chord*lbm_chord;
 	const float sp_skin  = cfgf(cfg, "speck_skin_off_frac", 0.06208f)*lbm_chord; // upper skin at 30%c vs bbox center
 	const float sp_le    = cfgf(cfg, "speck_le_off_frac", -0.20f)*lbm_chord;
+	// ---------------------------------------------------------------------
+	// Analytic TAIL VG stamping (same rationale as the wing row above:
+	// parity-proof, resolution-exact, sweeps without STL regeneration).
+	// Two INDEPENDENT rows so elevator-only / rudder-only configs exist:
+	//   vg_elev_*: counter-rotating pairs on the stab UNDERSIDE (the flare
+	//              suction side), row 100 mm ahead of the elevator hinge,
+	//              30 mm pair pitch -- the Strausak [IMP74] convention from
+	//              aircraft.yaml vg_defaults.elevator.
+	//   vg_rud_*:  the same convention mirrored onto BOTH fin sides ahead
+	//              of the raked rudder hinge (ANALOG: Strausak published no
+	//              rudder row; flagged in make_tail_assembly.py too).
+	// All anchors are millimeters in the tail-assembly STL frame, whose
+	// origin is the stab hinge / stab waterline / centerline (the export
+	// convention of make_tail_assembly.py); tail_origin_* maps that origin
+	// to the mesh bbox center the voxelizer parked at wc. Defaults match
+	// the standard tail_asm_* exports -- only the enables are needed.
+	const float k_mm     = lbm_chord/si_chord/1000.0f;           // mm -> lattice cells
+	const float to_x     = cfgf(cfg, "tail_origin_x_mm", 324.2f)*k_mm;   // origin aft of bbox center (chordwise)
+	const float to_z     = cfgf(cfg, "tail_origin_z_mm", -250.1f)*k_mm;  // origin below bbox center (vertical)
+	const bool ev_on     = cfgf(cfg, "vg_elev_enable", 0.0f)!=0.0f;
+	const float ev_h     = cfgf(cfg, "vg_elev_h_mm", 10.0f)*k_mm;
+	const float ev_p     = cfgf(cfg, "vg_elev_pitch_mm", 30.0f)*k_mm;    // pair pitch [IMP74]
+	const float ev_t     = cfgf(cfg, "vg_elev_t_mm", 1.5f)*k_mm;
+	const float ev_l     = cfgf(cfg, "vg_elev_l_per_h", 3.0f)*ev_h;
+	const float ev_b     = radians(cfgf(cfg, "vg_elev_beta_deg", 15.0f));
+	const float ev_row   = to_x-cfgf(cfg, "vg_elev_ahead_mm", 100.0f)*k_mm; // row LE, chordwise vs bbox center
+	const float ev_s0    = cfgf(cfg, "vg_elev_span0_mm", 42.1f)*k_mm;    // elevator root rib
+	const float ev_s1    = cfgf(cfg, "vg_elev_span1_mm", 1225.0f)*k_mm;  // hinge tip
+	const float ev_k0    = cfgf(cfg, "vg_elev_skin_root_mm", 31.8f)*k_mm; // skin depth below WL at the row, root
+	const float ev_k1    = cfgf(cfg, "vg_elev_skin_tip_mm", 22.1f)*k_mm;  // ... at the hinge tip (taper lerp)
+	const bool rd_on     = cfgf(cfg, "vg_rud_enable", 0.0f)!=0.0f;
+	const float rd_h     = cfgf(cfg, "vg_rud_h_mm", 10.0f)*k_mm;
+	const float rd_p     = cfgf(cfg, "vg_rud_pitch_mm", 30.0f)*k_mm;
+	const float rd_t     = cfgf(cfg, "vg_rud_t_mm", 1.5f)*k_mm;
+	const float rd_l     = cfgf(cfg, "vg_rud_l_per_h", 3.0f)*rd_h;
+	const float rd_b     = radians(cfgf(cfg, "vg_rud_beta_deg", 15.0f));
+	const float rd_rake  = radians(cfgf(cfg, "vg_rud_rake_deg", 22.125f)); // hinge lean aft [DXF]
+	const float rd_hx    = cfgf(cfg, "vg_rud_hinge_x_mm", 105.4f)*k_mm;  // hinge anchor in the origin frame
+	const float rd_hz    = cfgf(cfg, "vg_rud_hinge_z_mm", -248.4f)*k_mm;
+	const float rd_w0    = cfgf(cfg, "vg_rud_wl0_mm", 235.0f)*k_mm;      // row band: above the fin root rib...
+	const float rd_w1    = cfgf(cfg, "vg_rud_wl1_mm", 692.0f)*k_mm;      // ...to just under the horn
+	const float rd_k0    = cfgf(cfg, "vg_rud_skin0_mm", 50.1f)*k_mm;     // fin half-thickness at the row, band bottom
+	const float rd_k1    = cfgf(cfg, "vg_rud_skin1_mm", 33.0f)*k_mm;     // ... band top
+	const float rd_ahead = cfgf(cfg, "vg_rud_ahead_mm", 100.0f)*k_mm/cos(rd_rake); // perpendicular -> chordwise
+	std::atomic<uint> ev_cells(0u), rd_cells(0u);                // stamped-cell audit, printed below
 	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz(); parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
 		if(speck_on&&lbm.flags[n]==0u) {                         // stamp the mid-span speck
 			const float dx=(float)x-wc.x, dy=(float)y-wc.y, dz=(float)z-wc.z;
@@ -188,10 +234,67 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 				}
 			}
 		}
+		if(ev_on&&lbm.flags[n]==0u) {                            // stamp the elevator row (stab UNDERSIDE)
+			const float dx=(float)x-wc.x, dy=(float)y-wc.y, dz=(float)z-wc.z;
+			const float yw =  dy*cos(ar)+dz*sin(ar);             // un-pitch into the airframe frame
+			const float zw = -dy*sin(ar)+dz*cos(ar);
+			const float sp = fabs(dx);                           // span station (rows mirror about CL)
+			if(sp>ev_s0&&sp<ev_s1) {
+				// Local skin depth below the stab waterline: linear lerp
+				// root->tip tracks the planform taper closely enough to keep
+				// the 15% sink engaged across the whole row.
+				const float skin = to_z-(ev_k0+(ev_k1-ev_k0)*(sp-ev_s0)/(ev_s1-ev_s0));
+				if(zw<skin+1.5f&&zw>skin-ev_h) {                 // band: skin (with sink) down to vane tip
+					const float dyv = yw-ev_row;
+					if(dyv>-ev_t&&dyv<ev_l+ev_t) {
+						const float ul = fmod(fmod(sp-ev_s0, ev_p)+ev_p, ev_p);
+						for(int side=0; side<2; side++) {        // toe-out pair, same math as the wing row
+							const float sgn = side==0 ? 1.0f : -1.0f;
+							const float du = ul-(side==0 ? 0.25f : 0.75f)*ev_p;
+							const float along  = du*sin(sgn*ev_b)+dyv*cos(ev_b);
+							const float across = du*cos(ev_b)-dyv*sin(sgn*ev_b);
+							if(along>=0.0f&&along<=ev_l&&fabs(across)<=fmax(0.5f*ev_t, 0.75f)) { lbm.flags[n] = TYPE_S|TYPE_X; ev_cells++; break; }
+						}
+					}
+				}
+			}
+		}
+		if(rd_on&&lbm.flags[n]==0u) {                            // stamp the rudder rows (BOTH fin sides)
+			const float dx=(float)x-wc.x, dy=(float)y-wc.y, dz=(float)z-wc.z;
+			const float yw =  dy*cos(ar)+dz*sin(ar);
+			const float zw = -dy*sin(ar)+dz*cos(ar);
+			const float zo = zw-to_z;                            // height above the stab waterline origin
+			if(zo>rd_w0&&zo<rd_w1) {
+				// Hinge station at this waterline (raked aft), row one
+				// perpendicular offset ahead of it; vanes lie flow-aligned.
+				const float yw_row = to_x+rd_hx+tan(rd_rake)*(zo-rd_hz)-rd_ahead;
+				const float dyv = yw-yw_row;
+				if(dyv>-rd_t&&dyv<rd_l+rd_t) {
+					const float skin = rd_k0+(rd_k1-rd_k0)*(zo-rd_w0)/(rd_w1-rd_w0);
+					if(fabs(dx)>skin-1.5f&&fabs(dx)<skin+rd_h) { // plates stand off BOTH sides of the fin
+						// Pair pattern marches along the raked hinge length.
+						const float u = (zo-rd_w0)/cos(rd_rake);
+						const float ul = fmod(fmod(u, rd_p)+rd_p, rd_p);
+						for(int side=0; side<2; side++) {
+							const float sgn = side==0 ? 1.0f : -1.0f;
+							const float du = ul-(side==0 ? 0.25f : 0.75f)*rd_p;
+							const float along  = du*sin(sgn*rd_b)+dyv*cos(rd_b);
+							const float across = du*cos(rd_b)-dyv*sin(sgn*rd_b);
+							if(along>=0.0f&&along<=rd_l&&fabs(across)<=fmax(0.5f*rd_t, 0.75f)) { lbm.flags[n] = TYPE_S|TYPE_X; rd_cells++; break; }
+						}
+					}
+				}
+			}
+		}
 		if(lbm.flags[n]!=(TYPE_S|TYPE_X)&&lbm.flags[n]!=TYPE_S) lbm.u.y[n] = lbm_u;
 		const bool xwall = (x==0u||x==Nx-1u) && !slice;          // slice mode: x faces stay periodic (infinite VG array)
 		if(xwall||y==0u||y==Ny-1u||z==0u||z==Nz-1u) lbm.flags[n] = TYPE_E;
 	}); // ################################################################## run + measure ###################################################################
+	// Stamped-cell audit: zero cells with a row enabled means an anchor is
+	// off (wrong STL/origin pairing) -- fail loudly in the console rather
+	// than silently simming a clean tail.
+	if(ev_on) print_info("tail VG: elevator row stamped "+to_string((uint)ev_cells)+" cells (h="+to_string(ev_h, 1u)+" cells)");
+	if(rd_on) print_info("tail VG: rudder rows stamped "+to_string((uint)rd_cells)+" cells (h="+to_string(rd_h, 1u)+" cells)");
 	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE|VIS_Q_CRITERION;
 	// Startup camera framing (owner request): 2x zoom, 35 deg elevation looking
 	// down onto the wing's upper surface. All four knobs live in the config;
