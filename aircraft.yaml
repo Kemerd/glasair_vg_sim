@@ -1,0 +1,178 @@
+# =============================================================================
+#  aircraft.yaml — Stoddard-Hamilton Glasair III master parameter file
+# =============================================================================
+#  Single source of truth for every geometry/mesh/run/post script in this
+#  repository. No script may hard-code an aircraft parameter; everything
+#  dimensional is read from here and converted to SI by geometry/units.py.
+#
+#  UNIT CONVENTION
+#    Every dimensional quantity is a mapping:  {value: <num>, unit: "<tag>"}
+#    Accepted tags: m, mm, in, ft, m2, ft2, mps, mph, kt, deg, kg, lb, slug
+#    Dimensionless quantities are plain numbers.
+#
+#  DATA PROVENANCE (tags used in comments below)
+#    [3VIEW]    Stoddard-Hamilton factory 3-view, drawing rev G, 4/26/90
+#               (ref/Glasair-III-3-View-Drawing.pdf / .dwg / .ai)
+#    [VT2005]   Virginia Tech Glasair III analysis slides, Carobine/
+#               Fitzwater/Jackson, 2005-03-30 (ref/virginia_tech_GlassairIII.pdf)
+#    [IMP74]    Strausak VG flight-test article, IE Impulse #74, Jan 2021,
+#               pp. 7-9 (ref/Impulse74_Translated.pdf) — Lancair Legacy data,
+#               used only as the CENTER of our VG sweep ranges
+#    [SPEC]     glasair3-vg-cfd-spec.md project specification
+#    [DERIVED]  computed from other tagged values; formula given in comment
+#    TODO       unknown — needs user input or DXF measurement; placeholder
+#               values are flagged and must not be silently trusted
+# =============================================================================
+
+meta:
+  aircraft: "Stoddard-Hamilton Glasair III"
+  description: "Low-wing all-composite 2-seat experimental, retractable gear"
+  yaml_schema_version: 1
+
+# -----------------------------------------------------------------------------
+#  Freestream / atmosphere — sea-level ISA defaults, overridable per case
+# -----------------------------------------------------------------------------
+atmosphere:
+  density:        {value: 1.225,     unit: kgpm3}   # ISA sea level
+  kinematic_viscosity: {value: 1.4607e-5, unit: m2ps}  # ISA sea level, 15 C
+  temperature:    {value: 288.15,    unit: K}
+
+# -----------------------------------------------------------------------------
+#  Wing
+# -----------------------------------------------------------------------------
+wing:
+  airfoil_file: "geometry/ls413.dat"     # NASA/Langley LS(1)-0413 (GA(W)-2) [SPEC]
+  thickness_to_chord: 0.13               # published section t/c [SPEC]
+  # NOTE: [VT2005] slide 7 cites t/c = 12.5% for the as-built wing. The
+  # published LS(1)-0413 section is 13.0% (confirmed from committed
+  # coordinates: max t/c = 0.1298 @ x/c ~ 0.40). Discrepancy is unresolved —
+  # possibly a thinned mod or simply VT approximation. We proceed with the
+  # published 13% section per [SPEC]; revisit if factory docs say otherwise.
+  span:           {value: 23.276,  unit: ft}   # 23' 3-5/16" [3VIEW]; VT rounds to 23.3
+  area_ref:       {value: 87.6,    unit: ft2}  # S_ref [VT2005]
+  area_exposed:   {value: 81.3,    unit: ft2}  # S_wing exposed [VT2005]
+  aspect_ratio: 6.20                           # [VT2005]
+  taper_ratio: 0.75                            # [VT2005]
+  sweep_le:       {value: 0.0,     unit: deg}  # [VT2005] (LE near-straight on plot)
+  dihedral:       {value: 3.0,     unit: deg}  # [3VIEW]
+  washout:        {value: 0.0,     unit: deg}  # TODO unknown; [VT2005] spanload slide
+                                               # explored 1 deg washout hypothetically
+  mac:            {value: 3.76,    unit: ft}   # mean aerodynamic chord [VT2005]
+  chord_root:     {value: 4.297,   unit: ft}   # [DERIVED] 2*S/(b*(1+taper))
+  chord_tip:      {value: 3.223,   unit: ft}   # [DERIVED] taper * chord_root
+  # Chords above match the [VT2005] VLMpc planform plot (~4.3 / ~3.2 ft).
+  # TODO verify chord distribution against DXF when provided (geometry/dxf/).
+
+  aileron:
+    area_total:   {value: 4.79,  unit: ft2}    # both sides [VT2005]
+    span_each:    {value: 3.3,   unit: ft}     # [VT2005] "Span = 3.3 ft"
+    span_fraction_total: 0.3342                # b_aileron/b [VT2005]
+    area_fraction: 0.1094                      # S_aileron/S [VT2005]
+    # WARNING: internally inconsistent — 2*3.3/23.276 = 0.284, not 0.334.
+    # TODO resolve from DXF: true aileron spanwise extent + chord fraction.
+    chord_fraction: null                       # TODO from DXF (c_ail/c at station)
+    deflection_max_up:   {value: 20.0, unit: deg}  # TODO placeholder — confirm
+    deflection_max_down: {value: 12.5, unit: deg}  # TODO placeholder — confirm
+    mid_span_station:    {value: 9.3,  unit: ft}   # TODO placeholder = 0.80*b/2;
+    # study-1 section is cut here [SPEC]; refine from DXF aileron extent.
+
+  flap:
+    type: "plain"                # standard fit; slotted was factory option [VT2005]
+    # TODO confirm which flap the user's aircraft has (changes approach speed)
+    span_fraction: 0.475         # b_flaps/b [VT2005]
+    area_fraction: 0.075         # S_flaps/S [VT2005]
+    deflection_max: {value: 40.0, unit: deg}   # TODO placeholder — confirm
+
+# -----------------------------------------------------------------------------
+#  Horizontal stabilizer / elevator    (suction side = UNDERSIDE in flare)
+# -----------------------------------------------------------------------------
+horizontal_tail:
+  airfoil: "NACA 0010"          # TODO placeholder per [SPEC] — actual section unknown
+  area:           {value: 15.54, unit: ft2}    # S_tail [VT2005]
+  span:           {value: 8.2,   unit: ft}     # [DERIVED] from VLMpc planform plot
+                                               # (half-span ~4.1 ft); TODO verify vs DXF
+  chord_root:     {value: 2.3,   unit: ft}     # [DERIVED] from VLMpc plot; TODO verify
+  le_aft_of_wing_root_le: {value: 12.2, unit: ft}  # [DERIVED] from VLMpc plot
+  elevator:
+    area_total:   {value: 4.85,  unit: ft2}    # [VT2005]
+    hinge_gap:    {value: 1.59,  unit: mm}     # 1/16 in per factory drawing [SPEC]
+    chord_fraction: null                       # TODO from DXF
+    deflection_max_up:   {value: 25.0, unit: deg}  # TODO placeholder — confirm
+    deflection_max_down: {value: 20.0, unit: deg}  # TODO placeholder — confirm
+
+# -----------------------------------------------------------------------------
+#  Vertical fin / rudder
+# -----------------------------------------------------------------------------
+vertical_tail:
+  airfoil: "NACA 0010"          # TODO placeholder per [SPEC] — actual section unknown
+  area: null                    # TODO — [VT2005] gives only wetted 8.482 ft2 (implies
+                                # ~4.24 ft2 planform) yet rudder area 5.35 ft2 exceeds
+                                # that; definitions inconsistent. Resolve from DXF.
+  rudder:
+    area:         {value: 5.35,  unit: ft2}    # [VT2005] (definition ambiguous, see above)
+    hinge_gap:    {value: 1.59,  unit: mm}     # same 1/16 in gap convention [SPEC]
+    deflection_max: {value: 25.0, unit: deg}   # TODO placeholder — confirm
+
+# -----------------------------------------------------------------------------
+#  Fuselage (context only — not modeled in extruded-section studies)
+# -----------------------------------------------------------------------------
+fuselage:
+  length:         {value: 21.167, unit: ft}    # 21' 2" [3VIEW]
+  wetted_area:    {value: 232.66, unit: ft2}   # [VT2005]
+
+# -----------------------------------------------------------------------------
+#  Weights & balance
+# -----------------------------------------------------------------------------
+weights:
+  togw:           {value: 2400.0, unit: lb}    # [VT2005]
+  empty:          {value: 1625.0, unit: lb}    # [VT2005]
+  fuel:           {value: 438.0,  unit: lb}    # [VT2005]
+  payload:        {value: 337.0,  unit: lb}    # [VT2005]
+stability:
+  cg_assumed_frac_mac: 0.25                    # [VT2005]
+  neutral_point_frac_mac: 0.521                # [VT2005] (VLMpc)
+  static_margin: 0.271                         # [VT2005]
+
+# -----------------------------------------------------------------------------
+#  Reference flight conditions (drive Re / AoA grids; helper scripts compute
+#  Re = V * c / nu from these plus atmosphere + chord)
+# -----------------------------------------------------------------------------
+conditions:
+  stall_clean_speed:    {value: 80.0,  unit: mph}  # plain flap, GW 2400, SL [VT2005]
+  clmax_plain_flap: 1.80                           # [VT2005]
+  stall_slotted_speed:  {value: 73.0,  unit: mph}  # slotted option [VT2005]
+  clmax_slotted_flap: 2.16                         # [VT2005]
+  approach_speed:       {value: 104.0, unit: mph}  # [DERIVED] 1.3 * Vs0 (plain);
+                                                   # TODO confirm flap type & user SOP
+  vne:                  {value: 335.0, unit: mph}  # [VT2005]
+  cruise_points:                                    # [VT2005], GW 2400
+    - {altitude: {value: 8000,  unit: ft}, speed: {value: 258, unit: mph}, cl: 0.222}
+    - {altitude: {value: 17500, unit: ft}, speed: {value: 290, unit: mph}, cl: 0.238}
+    - {altitude: {value: 24000, unit: ft}, speed: {value: 313, unit: mph}, cl: 0.254}
+
+# -----------------------------------------------------------------------------
+#  VG sweep centers — Strausak Lancair Legacy program [IMP74]
+#  These are the CENTERS of our parameter sweeps, not conclusions.
+# -----------------------------------------------------------------------------
+vg_defaults:
+  vane_incidence:     {value: 15.0, unit: deg}   # both handed +/-15 to local flow [IMP74]
+  vane_length_per_height: 3.0                    # l = 3h default [SPEC]
+  arrangement: "counter-rotating"                # [IMP74]
+  wing:
+    chord_position_frac: 0.07                    # VG leading edge at 7% chord [IMP74]
+    spacing_outboard:   {value: 50.0, unit: mm}  # ahead of ailerons [IMP74]
+    spacing_inboard:    {value: 90.0, unit: mm}  # coarser -> root stalls first [IMP74]
+    taper_alignment_correction: {value: 7.0, unit: deg}  # trapezoid correction [IMP74]
+  elevator:
+    distance_ahead_of_hinge: {value: 100.0, unit: mm}  # underside [IMP74]
+    spacing:                 {value: 30.0,  unit: mm}  # [IMP74]
+  height_per_delta: [0.2, 0.5, 1.0]              # h/delta sweep values [SPEC];
+                                                 # delta from Phase-1 BL extraction
+
+# -----------------------------------------------------------------------------
+#  Solver environment (pinned once installed — M1)
+# -----------------------------------------------------------------------------
+solver:
+  openfoam_flavor: "ESI (OpenFOAM.com)"   # preferred for kOmegaSSTLM [SPEC]
+  openfoam_version: null                  # TODO pin exact version at install (>= v2406)
+  turbulence_model: "kOmegaSSTLM"         # gamma-Re_theta transition [SPEC]

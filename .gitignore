@@ -1,0 +1,23 @@
+# --- Python ---
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# --- CFD case outputs: heavy, regenerable; keep summaries only ---
+results/*
+!results/*.csv
+!results/REPORT.md
+!results/.gitkeep
+
+# OpenFOAM run artifacts inside case dirs (cases/ holds templates only)
+cases/**/processor*/
+cases/**/postProcessing/
+cases/**/log.*
+cases/**/[0-9]*.[0-9]*/
+
+# --- Rendered reference pages (regenerable from PDFs via ref/extract_pdfs.py) ---
+ref/pages/
+
+# --- Generated geometry (regenerable from aircraft.yaml + toolkit) ---
+*.stl
