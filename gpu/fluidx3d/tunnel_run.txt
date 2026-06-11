@@ -1,0 +1,21 @@
+# Glasair VG tunnel configuration -- read by FluidX3D at startup (no rebuild
+# needed). Edit and relaunch, or use tunnel.bat <aoa> <re> [mode] [stl].
+#
+# mode:    wing  = whole 1.5 m section with free tips (pretty, ~4 mm cells)
+#          slice = narrow span-periodic strip (science, ~1 mm cells; use a
+#                  --span-m 0.25 STL from make_vg_wing.py)
+# re:      Reynolds number = the airspeed knob at the 0.902 m aileron chord:
+#          stall 80 mph -> 2.2e6 | approach 104 mph -> 2.9e6 | cruise 258 mph -> 7.1e6
+# csv:     force-log path; empty disables logging. t_end_steps 0 = run forever.
+
+mode        = wing
+stl         = L:/Dev/glasair_vg_sim/gpu/fluidx3d/assets/wing_vg_h10mm.stl
+aoa_deg     = 14
+re          = 2.2e6
+vram_mb     = 6000
+u           = 0.10
+span_m      = 1.5
+chord_m     = 0.9022
+t_end_steps = 0
+log_every   = 1000
+csv         = L:/Dev/glasair_vg_sim/gpu/fluidx3d/results/forces_live.csv

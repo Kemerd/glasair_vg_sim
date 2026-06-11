@@ -36,35 +36,98 @@ void main_setup() { // benchmark; required extensions in defines.hpp: BENCHMARK,
 #endif // BENCHMARK
 
 #ifndef BENCHMARK
-void main_setup() { // Glasair III wing section (LS(1)-0413, factory-measured geometry) in a virtual wind tunnel
-	// required extensions in defines.hpp: FP16S, EQUILIBRIUM_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS
-	// Wing STL produced by the project's own geometry toolkit (L:/Dev/glasair_vg_sim,
-	// scripts in geometry/stl_gen.py): real aileron-station chord 0.9022 m, span 1.5 m.
-	// LBM frame convention follows the stock aircraft examples: flow along +y,
-	// vertical +z, span along +x. The STL is authored as x=chord, y=thickness,
-	// z=span, so it is rotated x->y (chord into the flow) then z-up restored.
-	// ################################################################## define simulation box size, viscosity and volume force ###################################################################
-	const uint3 lbm_N = resolution(float3(1.0f, 2.0f, 0.6f), 6000u); // span : streamwise : vertical aspect, VRAM budget in MB
-	const float lbm_Re = 1000000.0f;   // LES-effective Reynolds number (Smagorinsky absorbs the unresolved scales)
-	const float lbm_u = 0.10f;         // inflow speed in lattice units (low Mach)
-	const float aoa_deg = 8.0f;        // geometric angle of attack
-	const float si_span = 1.5f, si_chord = 0.9022f;            // STL true dimensions in meters
-	const float lbm_span = 0.55f*(float)lbm_N.x;               // wing span in lattice cells (tips stay inside the box -> tip vortices visible)
-	const float lbm_chord = lbm_span*(si_chord/si_span);       // chord in lattice cells, sets the Reynolds length scale
+#include <fstream>
+#include <sstream>
+#include <map>
+// Glasair III VG study tunnel -- config-file driven so AoA / Re / geometry /
+// domain mode change WITHOUT recompiling. Config format: "key=value" lines,
+// '#' comments, at L:/Dev/glasair_vg_sim/gpu/fluidx3d/tunnel_config.txt
+// (overridable as the first command-line argument).
+// required extensions in defines.hpp: FP16S, FORCE_FIELD, EQUILIBRIUM_BOUNDARIES, SUBGRID, INTERACTIVE_GRAPHICS
+static std::map<std::string, std::string> read_config(const std::string& path) {
+	std::map<std::string, std::string> cfg;
+	std::ifstream f(path);
+	std::string line;
+	while(std::getline(f, line)) {
+		const size_t hash = line.find('#');
+		if(hash!=std::string::npos) line = line.substr(0, hash);
+		const size_t eq = line.find('=');
+		if(eq==std::string::npos) continue;
+		auto trim = [](std::string s) {
+			const size_t a = s.find_first_not_of(" \t\r");
+			const size_t b = s.find_last_not_of(" \t\r");
+			return a==std::string::npos ? std::string() : s.substr(a, b-a+1u);
+		};
+		cfg[trim(line.substr(0, eq))] = trim(line.substr(eq+1u));
+	}
+	return cfg;
+}
+static float cfgf(std::map<std::string, std::string>& c, const std::string& k, const float d) {
+	return c.count(k) ? (float)atof(c[k].c_str()) : d;
+}
+static std::string cfgs(std::map<std::string, std::string>& c, const std::string& k, const std::string& d) {
+	return c.count(k) ? c[k] : d;
+}
+
+void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-measured chord)
+	// ################################################################## configuration ###################################################################
+	std::map<std::string, std::string> cfg =
+		read_config(main_arguments.size()>0u ? main_arguments[0] : "L:/Dev/glasair_vg_sim/gpu/fluidx3d/tunnel_config.txt");
+	const std::string stl_path = cfgs(cfg, "stl", "L:/Dev/glasair_vg_sim/gpu/fluidx3d/assets/wing_a0_binary.stl");
+	const std::string mode    = cfgs(cfg, "mode", "wing");   // wing = whole section + tips | slice = narrow high-res strip, span-periodic
+	const std::string csv     = cfgs(cfg, "csv", "");        // force log path; empty = no CSV
+	const float aoa_deg  = cfgf(cfg, "aoa_deg", 8.0f);
+	const float lbm_Re   = cfgf(cfg, "re", 1.0e6f);          // LES-effective Reynolds number (the "airspeed" knob: Re = V*c/nu)
+	const float vram_mb  = cfgf(cfg, "vram_mb", 6000.0f);
+	const float lbm_u    = cfgf(cfg, "u", 0.10f);            // lattice inflow speed (keep ~0.05..0.12 for stability)
+	const float si_span  = cfgf(cfg, "span_m", 1.5f);        // STL true span in meters
+	const float si_chord = cfgf(cfg, "chord_m", 0.9022f);    // STL true chord in meters [DXF measured]
+	const ulong t_end    = (ulong)cfgf(cfg, "t_end_steps", 0.0f);   // 0 = run forever (interactive)
+	const ulong log_every= (ulong)cfgf(cfg, "log_every", 1000.0f);
+	// ################################################################## box + scaling ###################################################################
+	const bool slice = (mode=="slice");
+	// wing mode: span along x with free tips inside the box. slice mode: the
+	// strip spans the box wall-to-wall in x and the x faces stay UNFLAGGED,
+	// i.e. periodic -- an infinite VG array, the LBM analog of the RANS
+	// spanwise-periodic domain in the project spec.
+	const float aspect_x = slice ? (si_span/si_chord) : 1.0f;
+	const uint3 lbm_N = resolution(slice ? float3(aspect_x, 2.2f, 1.2f) : float3(1.0f, 2.0f, 0.6f), (uint)vram_mb);
+	const float lbm_span  = slice ? (float)lbm_N.x : 0.55f*(float)lbm_N.x;
+	const float lbm_chord = lbm_span*(si_chord/si_span);
+	const float lbm_scale = fmaxf(lbm_span, lbm_chord);      // read_stl scales the mesh's LONGEST side to this
 	LBM lbm(lbm_N, units.nu_from_Re(lbm_Re, lbm_chord, lbm_u));
-	// ###################################################################################### define geometry ######################################################################################
-	Mesh* mesh = read_stl("L:/Dev/glasair_vg_sim/gpu/fluidx3d/assets/wing_a0_binary.stl", // binary STL (FluidX3D requirement; converted from the toolkit's ASCII export)
-	                      lbm.size(), lbm.center(), float3x3(float3(1, 0, 0), radians(90.0f)), lbm_span); // rotate STL x(chord)->y(flow), longest side (span) scaled to lbm_span
-	mesh->rotate(float3x3(float3(0, 0, 1), radians(90.0f)));   // bring the span onto +x and thickness onto +z (z-up)
-	mesh->rotate(float3x3(float3(1, 0, 0), radians(-aoa_deg))); // pitch the leading edge UP by the angle of attack (flow comes from -y)
-	mesh->translate(float3(0.0f, -0.15f*lbm.size().y, 0.0f));  // park the wing upstream of center so the wake has room to develop
-	lbm.voxelize_mesh_on_device(mesh);
+	print_info("VG tunnel: mode="+mode+", aoa="+to_string(aoa_deg, 1u)+" deg, Re="+to_string(lbm_Re)
+	           +", chord="+to_string(lbm_chord, 1u)+" cells ("+to_string(si_chord/lbm_chord*1000.0f, 2u)+" mm/cell)");
+	// ################################################################## geometry ###################################################################
+	// STL frame: x=chord, y=thickness, z=span. LBM frame: flow +y, up +z, span +x.
+	Mesh* mesh = read_stl(stl_path, lbm.size(), lbm.center(), float3x3(float3(1, 0, 0), radians(90.0f)), lbm_scale);
+	mesh->rotate(float3x3(float3(0, 0, 1), radians(90.0f)));     // span onto +x, thickness up onto +z
+	mesh->rotate(float3x3(float3(1, 0, 0), radians(-aoa_deg)));  // pitch LE up by the angle of attack
+	mesh->translate(float3(0.0f, -0.15f*lbm.size().y, 0.0f));    // park upstream so the wake can develop
+	lbm.voxelize_mesh_on_device(mesh, TYPE_S|TYPE_X);            // TYPE_X marks the wing for object_force()
 	const uint Nx=lbm.get_Nx(), Ny=lbm.get_Ny(), Nz=lbm.get_Nz(); parallel_for(lbm.get_N(), [&](ulong n) { uint x=0u, y=0u, z=0u; lbm.coordinates(n, x, y, z);
-		if(lbm.flags[n]!=TYPE_S) lbm.u.y[n] = lbm_u;           // uniform inflow everywhere that is not wing
-		if(x==0u||x==Nx-1u||y==0u||y==Ny-1u||z==0u||z==Nz-1u) lbm.flags[n] = TYPE_E; // equilibrium boundaries on all tunnel walls
-	}); // ####################################################################### run simulation, export images and data ##########################################################################
-	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE|VIS_Q_CRITERION; // wing surface + vortex isosurfaces
-	lbm.run();
+		if(lbm.flags[n]!=(TYPE_S|TYPE_X)&&lbm.flags[n]!=TYPE_S) lbm.u.y[n] = lbm_u;
+		const bool xwall = (x==0u||x==Nx-1u) && !slice;          // slice mode: x faces stay periodic (infinite VG array)
+		if(xwall||y==0u||y==Ny-1u||z==0u||z==Nz-1u) lbm.flags[n] = TYPE_E;
+	}); // ################################################################## run + measure ###################################################################
+	lbm.graphics.visualization_modes = VIS_FLAG_SURFACE|VIS_Q_CRITERION;
+	const float A_ref = lbm_chord*lbm_span;                      // planform reference area in lattice units
+	const float q_ref = 0.5f*lbm_u*lbm_u;                        // lattice dynamic pressure (rho = 1)
+	if(!csv.empty()) write_file(csv, "# Glasair VG tunnel force log | mode="+mode+" stl="+stl_path
+		+" aoa_deg="+to_string(aoa_deg, 1u)+" Re="+to_string(lbm_Re)+" mm_per_cell="+to_string(si_chord/lbm_chord*1000.0f, 3u)
+		+"\n# t,Fx,Fy,Fz,Cd,Cl\n");
+	lbm.run(0u);                                                 // initialize
+	while(t_end==0ull||lbm.get_t()<t_end) {                      // measurement loop (Ahmed-body idiom)
+		lbm.run(log_every, t_end);
+		if(!csv.empty()) {
+			const float3 F = lbm.object_force(TYPE_S|TYPE_X);    // integrated lattice force on the wing
+			const float Cd = F.y/(q_ref*A_ref);                  // streamwise (+y = flow) -> drag coefficient
+			const float Cl = F.z/(q_ref*A_ref);                  // vertical (+z) -> lift coefficient
+			write_line(csv, to_string(lbm.get_t())+","+to_string(F.x, 6u)+","+to_string(F.y, 6u)+","
+			           +to_string(F.z, 6u)+","+to_string(Cd, 6u)+","+to_string(Cl, 6u)+"\n");
+		}
+	}
+	lbm.write_status();
 } /**/
 #endif // !BENCHMARK
 
