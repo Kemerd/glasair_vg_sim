@@ -184,6 +184,14 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 	lbm.write_status();
 	if(t_end>0ull) print_info("run complete: "+to_string(t_end_si, 2u)+" s of physical airflow simulated"
 	                          +(film ? ", "+to_string(frame)+" frames written" : "")+". Closing.");
+#ifdef INTERACTIVE_GRAPHICS
+	// Finite runs under INTERACTIVE_GRAPHICS crash with an access violation in
+	// teardown (the render thread races LBM destruction once main_setup
+	// returns; observed as exit code 0xC0000005 with all results intact).
+	// All outputs above are already flushed to disk, so end the process
+	// deliberately before the broken teardown path can run.
+	if(t_end>0ull) exit(0);
+#endif // INTERACTIVE_GRAPHICS
 } /**/
 #endif // !BENCHMARK
 

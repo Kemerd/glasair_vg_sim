@@ -31,7 +31,14 @@ MIN_ROWS = 20              # below this the case is treated as incomplete
 
 
 def settled_stats(case_csv: Path):
-    """(mean Cl, mean Cd, Cl pk-pk, n) over the post-transient window."""
+    """(mean Cl, mean Cd, Cl pk-pk, n, drift) over the post-transient window.
+
+    drift = second-half mean Cl minus first-half mean Cl of the settled
+    window. A statistically steady signal drifts ~0; drift comparable to the
+    deltas being reported means transient leaked into the average and the
+    case needs a longer t_end_si -- the report flags it with (!) instead of
+    presenting the mean as settled truth.
+    """
     rows = []
     with open(case_csv, encoding="utf-8") as fh:
         for r in csv_mod.reader(ln for ln in fh if not ln.startswith("#")):
@@ -44,7 +51,10 @@ def settled_stats(case_csv: Path):
     cl = sum(r[2] for r in cut) / n
     cd = sum(r[1] for r in cut) / n
     pp = max(r[2] for r in cut) - min(r[2] for r in cut)
-    return cl, cd, pp, n
+    half = n // 2
+    cl_a = sum(r[2] for r in cut[:half]) / max(1, half)
+    cl_b = sum(r[2] for r in cut[half:]) / max(1, n - half)
+    return cl, cd, pp, n, cl_b - cl_a
 
 
 def main() -> int:
@@ -67,24 +77,27 @@ def main() -> int:
             lines += [f"## {sp_label}: no complete clean baseline yet", ""]
             continue
         any_block = True
-        cl0, cd0, pp0, n0 = stats["clean"]
+        cl0, cd0, pp0, n0, drift0 = stats["clean"]
         lines += [f"## {sp_label} (clean baseline: Cl={cl0:.4f} Cd={cd0:.4f} "
                   f"buffet={pp0:.4f}, {n0} samples)", "",
-                  "| design | mean Cl | dCl | dCl % | proj. stall speed | mean Cd | dCd | buffet |",
-                  "|---|---|---|---|---|---|---|---|"]
+                  "| design | mean Cl | dCl | dCl % | proj. stall speed | mean Cd | dCd | buffet | drift |",
+                  "|---|---|---|---|---|---|---|---|---|"]
         for d in DESIGNS:
             if d not in stats:
-                lines.append(f"| {d} | (incomplete) | | | | | | |")
+                lines.append(f"| {d} | (incomplete) | | | | | | | |")
                 continue
-            cl, cd, pp, _ = stats[d]
+            cl, cd, pp, _, drift = stats[d]
+            # (!) marks a settled window whose own mean is still moving by
+            # more than 5% of Cl -- treat that case's numbers as provisional.
+            flag = " (!)" if abs(drift) > 0.05 * abs(cl) else ""
             if d == "clean":
                 lines.append(f"| clean | {cl:.4f} | -- | -- | {mph:.0f} mph (ref) "
-                             f"| {cd:.4f} | -- | {pp:.4f} |")
+                             f"| {cd:.4f} | -- | {pp:.4f} | {drift:+.4f}{flag} |")
             else:
                 vs = mph * math.sqrt(max(1e-9, cl0) / max(1e-9, cl))
                 lines.append(f"| {d} | {cl:.4f} | {cl - cl0:+.4f} | "
                              f"{(cl - cl0) / abs(cl0) * 100.0:+.1f}% | "
-                             f"~{vs:.1f} mph | {cd:.4f} | {cd - cd0:+.4f} | {pp:.4f} |")
+                             f"~{vs:.1f} mph | {cd:.4f} | {cd - cd0:+.4f} | {pp:.4f} | {drift:+.4f}{flag} |")
         lines.append("")
     out = SUITE / "REPORT.md"
     out.write_text("\n".join(lines), encoding="utf-8")

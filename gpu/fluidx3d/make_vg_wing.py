@@ -70,12 +70,17 @@ def make_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
     return box
 
 
-def build_vg_wing(span_m: float, h_m: float, out_path: Path) -> None:
-    """Wing section + counter-rotating VG row, exported as one binary STL."""
+def build_vg_wing(span_m: float, h_m: float, out_path: Path,
+                  pitch_m: float | None = None) -> None:
+    """Wing section + counter-rotating VG row, exported as one binary STL.
+
+    pitch_m overrides the aircraft.yaml pair spacing (sweep variable); None
+    keeps the Strausak outboard default from vg_defaults.
+    """
     ac = load_aircraft(REPO / "aircraft.yaml")
     chord = ac.wing.aileron.chord_at_mid_station        # 0.9022 m [DXF]
     x_frac = ac.vg_defaults.wing.chord_position_frac    # 0.07 [IMP74]
-    pitch = ac.vg_defaults.wing.spacing_outboard        # 0.050 m [IMP74]
+    pitch = pitch_m if pitch_m else ac.vg_defaults.wing.spacing_outboard  # 0.050 m [IMP74]
     beta = ac.vg_defaults.vane_incidence                # radians (15 deg)
     l_per_h = ac.vg_defaults.vane_length_per_height     # 3.0 [SPEC]
 
@@ -121,6 +126,8 @@ def main() -> None:
                     help="VG vane height in mm (default 10, STOLspeed-class)")
     ap.add_argument("--span-m", type=float, default=1.5,
                     help="extruded wing span in m (default 1.5)")
+    ap.add_argument("--pitch-mm", type=float, default=0.0,
+                    help="VG pair spacing in mm (0 = aircraft.yaml default, 50)")
     a = ap.parse_args()
 
     ASSETS.mkdir(parents=True, exist_ok=True)
@@ -139,8 +146,12 @@ def main() -> None:
     print(f"wrote {clean_path.name}: clean wing | watertight="
           f"{clean.is_watertight} faces={len(clean.faces)}")
 
+    # Pitch token in the filename only when overridden, so the legacy 50 mm
+    # asset names from earlier suites keep working.
+    ptag = f"_p{a.pitch_mm:g}mm" if a.pitch_mm > 0.0 else ""
     build_vg_wing(a.span_m, a.height_mm / 1000.0,
-                  ASSETS / f"wing_vg_h{a.height_mm:g}mm{tag}.stl")
+                  ASSETS / f"wing_vg_h{a.height_mm:g}mm{ptag}{tag}.stl",
+                  pitch_m=a.pitch_mm / 1000.0 if a.pitch_mm > 0.0 else None)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ indicative single-AoA proxy, not a measured CLmax ratio.
 |---|---|---|---|---|---|---|---|
 | clean | 1.9462 | -- | -- | 80 mph (ref) | 0.2956 | -- | 0.6747 |
 | vg08mm | 1.6221 | -0.3240 | -16.7% | ~87.6 mph | 0.4017 | +0.1061 | 0.6558 |
-| vg12mm | (incomplete) | | | | | | |
+| vg12mm | 1.7259 | -0.2203 | -11.3% | ~85.0 mph | 0.4164 | +0.1208 | 0.8904 |
 | vg16mm | (incomplete) | | | | | | |
 
 ## 60mph: no complete clean baseline yet
