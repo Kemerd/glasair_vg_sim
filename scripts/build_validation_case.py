@@ -104,6 +104,11 @@ R_AIR = 287.058              # J/(kg K)
 # suction peak / transition region, fine again into the TE for the blunt
 # base and the aft pressure recovery, uniform-ish over the mid chord.
 N_SURF_BASE = 128            # cells per surface (upper, lower) at level 0
+BASE_EDGE_DIVISOR = 12.0     # blunt-base corner cell floor: base_height/12 at
+                             # level 0 (level-scaled). Stability-driven -- see
+                             # the base-slab block in plan_cgrid for the full
+                             # rationale (h1-matched edges diverge the steady
+                             # solver by resolving TE vortex shedding).
 SURF_ZONES = (
     (0.20, 0.34, 10.0),      # LE cluster: grows away from the nose
     (0.55, 0.36, 1.0),       # mid chord: uniform
@@ -367,26 +372,37 @@ def plan_cgrid(re_target: float, nu: float, rho: float, temperature: float,
         first=d_te, last=d_te * r_wake ** (n_wake - 1), length=WAKE_LENGTH,
     )
 
-    # Blunt-base slab (W_m), transverse direction: the W_u/W_l blocks meet
-    # the wake-cut lines with the y+ = 1 first cell h1, so a uniform run
-    # across the base would jump 57x..218x in wall-normal size at the two
-    # shared corners (Re 1.5M..6M). Instead the base gets a SYMMETRIC
-    # two-zone multigrading: each half runs from h1 at its corner toward a
-    # coarse midline at a cell-to-cell ratio capped at GROWTH_CAP, solved
-    # exactly so the edge cell IS h1 (same count-then-exact-ratio discipline
-    # as the wall-normal run, including the sqrt(2) level scaling). The base
-    # wall itself remains resolved by the wake's streamwise spacing (dead-air
-    # recirculation; the yPlus function object writes the evidence).
+    # Blunt-base slab (W_m), transverse direction. Two competing constraints
+    # meet at the wake-cut lines:
+    #   (a) the W_u/W_l blocks arrive there with the y+ = 1 first cell h1,
+    #       so a coarse uniform base run jumps 57x..218x in transverse size
+    #       at the two shared corners (review finding), but
+    #   (b) matching h1 exactly was observed to DIVERGE the steady solver on
+    #       real runs: blockMesh grading is constant along the block, so an
+    #       h1-matched edge follows the whole 25c wake, producing O(1e5)
+    #       aspect-ratio cells and a wake fine enough to resolve blunt-TE
+    #       vortex shedding -- which steady SIMPLE cannot damp (runs went
+    #       unstable after ~100 healthy iterations, p-solver blow-up).
+    # Phase-1 gates are all airfoil-surface quantities, so wake fidelity
+    # buys nothing here. Resolution: symmetric two-zone multigrading whose
+    # corner edge cell is FLOORED at base_height / BASE_EDGE_DIVISOR
+    # (level-scaled). The remaining corner jump (~50x at Re 3M level 0)
+    # stays under the uniform run's worst case while keeping the wake
+    # dissipative enough for a stable steady solve; revisit only if a study
+    # ever gates on wake quantities. The base wall itself remains resolved
+    # by the wake's streamwise spacing (dead-air recirculation; the yPlus
+    # function object writes the evidence).
     half_base = 0.5 * base_height
-    n_bhalf0 = max(2, _count_for_ratio(y1, half_base, GROWTH_CAP))
-    n_bhalf = int(math.ceil(n_bhalf0 * scale))
-    r_base = _ratio_for_count(h1, half_base, n_bhalf)
+    base_edge = max(h1, base_height / (BASE_EDGE_DIVISOR * scale))
+    n_bhalf = max(2, _count_for_ratio(base_edge, half_base, GROWTH_CAP))
+    r_base = _ratio_for_count(base_edge, half_base, n_bhalf)
     if r_base > GROWTH_CAP + 1.0e-9:
         raise RuntimeError(
             f"base growth ratio {r_base:.4f} exceeds cap {GROWTH_CAP}")
     base = GradedRun(
         n=n_bhalf, ratio=r_base, grading=r_base ** (n_bhalf - 1),
-        first=h1, last=h1 * r_base ** (n_bhalf - 1), length=half_base,
+        first=base_edge, last=base_edge * r_base ** (n_bhalf - 1),
+        length=half_base,
     )
     n_base = 2 * n_bhalf
 
