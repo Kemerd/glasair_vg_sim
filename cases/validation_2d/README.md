@@ -33,3 +33,24 @@ Every boundary-condition choice is justified inline in the `template/0/`
 dictionaries; the per-case `README.md` carries the flow-condition table, the
 Re 6M Mach note, the mesh summary, and the exact pimpleFoam pseudo-transient
 fallback deltas. Unit tests: `tests/test_case_gen.py`.
+
+## Post-stall fallback (template/pimple_overrides/)
+
+`template/pimple_overrides/` holds the COMPLETE pimpleFoam localEuler
+variant dictionaries (controlDict / fvSchemes / fvSolution; deltas marked
+`VARIANT:` inline). The builder copies the directory into every
+instantiated case; when a post-stall point (alpha >= 14 deg by default,
+`--pimple-alpha` to change) fails the steady convergence gate,
+`scripts/run_validation.py` copies these files over the case's `system/`
+and re-runs the solve once -- a reproducible, mechanical swap, never a hand
+edit. The gate report (`validation/compare_gate.py`) reads `application`
+from each case's controlDict and flags those points as pseudo-transient in
+`validation/report.md`. Full delta documentation: `template/README.md`.
+
+## Transition-gate data chain
+
+`template/system/wallShearStressObj` dumps the airfoil-patch kinematic wall
+shear (raw surface format, `onEnd`) to `postProcessing/wallCf/<time>/`;
+`scripts/extract_cf.py` converts it to the suction-surface
+`postProcessing/cf_upper.csv` (`Cf = |tau_w/rho| / (0.5 U_inf^2)`), which
+feeds the transition detector in `validation/compare_gate.py` (gate c).

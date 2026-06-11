@@ -17,8 +17,9 @@ FoamFile
 // scripts/first_cell_height.py, scaled 1/sqrt(2) per level), wall-normal
 // ratio 1.199661151 over 73 cells (34 inside the
 // d99 estimate 0.01874034031 m; spec floor 30). Wake ratio 1.196412364
-// over 42 cells from the TE spacing 0.002632352879 m. Total
-// 25072 cells.
+// over 42 cells from the TE spacing 0.002632352879 m. Blunt base:
+// 46 cells, symmetric two-zone grading from h1 at both corners
+// (ratio 1.199815732). Total 26752 cells.
 
 scale   1.0;
 
@@ -72,10 +73,13 @@ blocks
     hex (7 2 5 9 17 12 15 19) (42 73 1)
     simpleGrading ( 0.0006410374648 492287.5609 1 )
 
-    // W_m: slab behind the blunt base (left face = the base wall). Uniform
-    // across the base; streamwise identical to W_u.
-    hex (2 7 6 1 12 17 16 11) (42 6 1)
-    simpleGrading ( 1559.971226 1 1 )
+    // W_m: slab behind the blunt base (left face = the base wall);
+    // streamwise identical to W_u. Transverse (x2 = lower cut -> upper cut):
+    // symmetric two-zone multigrading, edge cells = h1 at BOTH corners so
+    // the shared wake-cut faces match W_l/W_u cell-for-cell (ratio
+    // 1.199815732, cap 1.2, 46 cells across the base).
+    hex (2 7 6 1 12 17 16 11) (42 46 1)
+    simpleGrading ( 1559.971226 ( (0.5 23 55.01994408) (0.5 23 0.01817522749) ) 1 )
 );
 
 edges

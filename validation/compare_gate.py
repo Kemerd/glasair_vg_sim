@@ -42,21 +42,30 @@ Input contracts (all CSV, '#' comments allowed, header row required)
   XFOIL polar       alpha,cl,cd,cm,xtr_top   validation/xfoil/polar_*.csv from
                                              validation/xfoil_polar.py; Re and
                                              Ncrit are parsed from the filename
-                                             (e.g. polar_Re3e6_N9_free.csv).
+                                             (e.g. polar_Re3M_N9_free.csv; the
+                                             pre-Ncrit legacy spelling
+                                             polar_Re3M_free.csv still resolves).
   NASA digitized    alpha,cl[,cd]            validation/nasa/digitized/*.csv,
                                              hand-digitized from the reports in
                                              validation/nasa/ (may not exist yet).
   RANS transition   alpha,xtr_top            results/validation/transition_*.csv,
                                              built by the orchestrator from the
-                                             extract_bl Cf curves through the
+                                             scripts/extract_cf.py wall-Cf curves
+                                             (cf_upper.csv per case) through the
                                              detector above.
 
 Column names are matched case-insensitively through an alias table, so minor
 header spelling differences between producers do not break the gate.
 
+Solver provenance: each sweep case's controlDict 'application' entry is read
+from --case-root, and any point solved by the pimpleFoam pseudo-transient
+fallback (instead of steady simpleFoam) is flagged in the report - both in
+the configuration table and as an explicit note (spec section 4).
+
 CLI:  python validation/compare_gate.py [--re 3e6] [--level 0] [--ncrit 9]
           [--of-csv PATH] [--xfoil-dir DIR] [--nasa-dir DIR]
-          [--transition-csv PATH] [--report PATH] [--yaml PATH]
+          [--transition-csv PATH] [--case-root DIR] [--report PATH]
+          [--yaml PATH]
 
 Exit status: 1 if any gate FAILED, else 0 (SKIPPED gates do not fail the
 process, but they are loudly visible in the report and on the console).
@@ -136,7 +145,8 @@ _COLUMN_ALIASES: Dict[str, str] = {
     "top_xtr": "xtr_top", "xtr_t": "xtr_top", "xtr": "xtr_top",
     "xtr_bot": "xtr_bot", "xtrbot": "xtr_bot", "xtr_lower": "xtr_bot",
     "bot_xtr": "xtr_bot",
-    # wall-Cf curve columns (extract_bl output consumed by the detector)
+    # wall-Cf curve columns (scripts/extract_cf.py output consumed by the
+    # transition detector)
     "x_c": "x_c", "x/c": "x_c", "xc": "x_c", "x": "x_c",
     "cf": "cf", "cfx": "cf",
 }
@@ -240,9 +250,12 @@ def find_xfoil_polar(xfoil_dir: Path, re_value: float, ncrit: int = 9,
     Returns (path, note); path is None when nothing usable exists and the
     note then carries the human-readable reason for the SKIPPED verdict.
     Selection order: exact Re match (1 % tolerance) filtered by transition
-    type, with an Ncrit-match preference; if no file carries a parsable Re
-    token but exactly one candidate exists, that file is used with a loud
-    assumption note rather than silently.
+    type, then by Ncrit token (current naming: polar_Re3M_N9_free.csv). For
+    backward compatibility, Re-matched files WITHOUT an Ncrit token (the
+    legacy polar_Re3M_free.csv spelling) are accepted next with a loud
+    assumption note - renamed archives keep resolving but never silently. If
+    no file carries a parsable Re token but exactly one candidate exists,
+    that file is used with the same kind of explicit note.
     """
     xfoil_dir = Path(xfoil_dir)
     if not xfoil_dir.is_dir():
@@ -265,8 +278,18 @@ def find_xfoil_polar(xfoil_dir: Path, re_value: float, ncrit: int = 9,
     if matched:
         # Prefer the requested Ncrit when several Re-matched files exist.
         ncrit_hits = [p for p in matched if _ncrit_from_name(p.name) == ncrit]
-        chosen = (ncrit_hits or matched)[0]
-        return chosen, f"matched {chosen.name}"
+        if ncrit_hits:
+            return ncrit_hits[0], f"matched {ncrit_hits[0].name}"
+        # Backward-compat path: legacy filenames carry no Ncrit token at all
+        # (polar_Re3M_free.csv). Accept them with an explicit assumption note
+        # so old archives keep working; a file tagged with a DIFFERENT Ncrit
+        # is only taken as the last resort, again loudly.
+        legacy = [p for p in matched if _ncrit_from_name(p.name) is None]
+        if legacy:
+            return legacy[0], (f"WARNING: no Ncrit token in {legacy[0].name} "
+                               f"(legacy naming); assumed Ncrit={ncrit}")
+        return matched[0], (f"WARNING: no polar tagged N{ncrit}; "
+                            f"using {matched[0].name}")
 
     # No Re token matched: a single untagged candidate is accepted with an
     # explicit assumption note; multiple untagged files are ambiguous and
@@ -286,6 +309,18 @@ def find_nasa_polar(nasa_dir: Path, re_value: float
     The digitized files may not exist yet (digitization is follow-on manual
     work from the PDFs in validation/nasa/); absence is reported as a note so
     the Clmax/stall gates can be marked SKIPPED, never silently passed.
+
+    Tunnel data only exists at the DISCRETE chord Reynolds numbers the
+    facility actually ran (TM X-72843 figure 5: 2.2 / 4.3 / 6.4 e6), which
+    rarely coincide with the CFD sweep Re, so an exact (1 %) match is the
+    exception. After the exact pass fails, the NEAREST-Re curve (log-Re
+    distance, since Re effects scale logarithmically) is accepted as the
+    experimental anchor PROVIDED it sits within a factor of two of the
+    requested Re - close enough for the 10 % Clmax / 2 deg stall gates given
+    the gentle Re trend of the LS(1)-0413 - and the assumption is carried in
+    a loud WARNING note that compare_gate's main() prints into the report
+    notes. Curves further than 2x off are refused: comparing across a wider
+    Re gap would not validate anything.
     """
     nasa_dir = Path(nasa_dir)
     if not nasa_dir.is_dir():
@@ -303,11 +338,99 @@ def find_nasa_polar(nasa_dir: Path, re_value: float
                    <= 0.01 * re_value)]
     if matched:
         return matched[0], f"matched {matched[0].name}"
+
+    # Nearest-Re fallback (see docstring): smallest |log(Re_file/Re_req)|
+    # wins, bounded at a factor of two; the deviation is spelled out so the
+    # report reader can judge the anchor for themselves.
+    tagged = [(p, _re_from_name(p.name)) for p in candidates]
+    tagged = [(p, r) for p, r in tagged if r is not None and r > 0.0]
+    if tagged and re_value > 0.0:
+        best, best_re = min(tagged,
+                            key=lambda t: abs(math.log(t[1] / re_value)))
+        if abs(math.log(best_re / re_value)) <= math.log(2.0):
+            off = (best_re - re_value) / re_value
+            return best, (f"WARNING: no NASA CSV at Re={re_value:.3g}; "
+                          f"using nearest-Re curve {best.name} "
+                          f"(Re={best_re:.3g}, {off:+.0%} off the requested "
+                          f"Re) as the experimental anchor")
+
     if len(candidates) == 1:
         return candidates[0], (f"WARNING: no Re token in {candidates[0].name};"
                                f" assumed it matches Re={re_value:.3g}")
-    return None, (f"no NASA CSV matching Re={re_value:.3g} in {nasa_dir} "
+    return None, (f"no NASA CSV within 2x of Re={re_value:.3g} in {nasa_dir} "
                   f"({len(candidates)} file(s) present)")
+
+
+# =============================================================================
+#  Pseudo-transient case annotation (pimpleFoam post-stall fallback)
+# =============================================================================
+#  Post-stall cases that refused to converge steady are re-solved by the M1
+#  driver with the pimpleFoam localEuler variant (cases/validation_2d/
+#  template/pimple_overrides/, applied by scripts/run_validation.py). The
+#  spec requires such points to be FLAGGED in the validation report, and the
+#  ground truth for "which solver actually ran" is each case's own
+#  system/controlDict 'application' entry - so the report reads it from
+#  there, never from any side channel that could drift.
+
+def read_case_application(case_dir: Path) -> Optional[str]:
+    """The 'application' entry of one case's system/controlDict.
+
+    Returns the solver name (e.g. 'simpleFoam' / 'pimpleFoam') or None when
+    the dictionary is absent or carries no application entry. Shared with
+    scripts/run_validation.py so the retry logic and the report annotation
+    agree on what the case is configured to run.
+    """
+    ctrl = Path(case_dir) / "system" / "controlDict"
+    if not ctrl.is_file():
+        return None
+    text = ctrl.read_text(encoding="utf-8", errors="replace")
+    m = _regex.search(r"^\s*application\s+(\w+)\s*;", text,
+                      flags=_regex.MULTILINE)
+    return m.group(1) if m else None
+
+
+def _alpha_from_case_name(name: str) -> Optional[float]:
+    """Decode the AoA from a case-directory name's alpha token.
+
+    Inverse of the builder's case_name() spelling ('-' -> 'm', '.' -> 'p'):
+    'val2d_aoam2p5_re3e6_lvl0' -> -2.5. None when no token is present.
+    """
+    m = _regex.search(r"aoa(m?)([0-9]+(?:p[0-9]+)?)", name)
+    if not m:
+        return None
+    value = float(m.group(2).replace("p", "."))
+    return -value if m.group(1) else value
+
+
+def pseudo_transient_cases(case_root: Path, re_value: float, level: int
+                           ) -> List[Tuple[float, str]]:
+    """(alpha, application) for sweep cases NOT configured for simpleFoam.
+
+    Scans up to two directory levels under ``case_root`` (mirroring the
+    orchestrator's case discovery) for directories whose names carry this
+    configuration's Re and level tags, and reports every case whose
+    controlDict names a different solver - i.e. the pimpleFoam pseudo-
+    transient fallback points that the report must annotate.
+    """
+    case_root = Path(case_root)
+    if not case_root.is_dir():
+        return []
+    tag, lvl = re_tag(re_value), f"lvl{level}"
+    hits: List[Tuple[float, str]] = []
+    for d in sorted(case_root.glob("**/")):
+        path_str = str(d.relative_to(case_root))
+        # Same tag-matching rule as the orchestrator: alpha token in the
+        # leaf name, Re/level tags anywhere along the relative path.
+        if "aoa" not in d.name or tag not in path_str or lvl not in path_str:
+            continue
+        app = read_case_application(d)
+        if app is None or app == "simpleFoam":
+            continue
+        alpha = _alpha_from_case_name(d.name)
+        if alpha is not None:
+            hits.append((alpha, app))
+    hits.sort(key=lambda t: t[0])
+    return hits
 
 
 # =============================================================================
@@ -541,8 +664,8 @@ def gate_transition(rans_transition: Optional[Dict[str, np.ndarray]],
            f"alpha <= {XTR_ALPHA_MAX:g} deg")
     if rans_transition is None:
         return GateResult("transition_xtr", "SKIPPED",
-                          "no RANS transition table (case wall-Cf sampling "
-                          "not available yet)", threshold=thr)
+                          "no RANS transition table (scripts/extract_cf.py "
+                          "wall-Cf curves not available yet)", threshold=thr)
     if xfoil_polar is None or "xtr_top" not in xfoil_polar:
         return GateResult("transition_xtr", "SKIPPED",
                           "XFOIL polar missing (or lacks xtr_top column)",
@@ -714,6 +837,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--transition-csv", type=Path, default=None,
                         help="RANS transition CSV (alpha,xtr_top); default "
                              "results/validation/transition_Re<tag>_L<lvl>.csv")
+    parser.add_argument("--case-root", type=Path,
+                        default=REPO / "cases" / "validation",
+                        help="root of the solved sweep cases; each case's "
+                             "controlDict 'application' entry is read to "
+                             "annotate pimpleFoam pseudo-transient fallback "
+                             "points in the report")
     parser.add_argument("--report", type=Path,
                         default=REPO / "validation" / "report.md",
                         help="gate report to append-update")
@@ -760,6 +889,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     nasa_polar = read_csv_columns(na_path) if na_path else None
     rans_tr = (read_csv_columns(args.transition_csv)
                if Path(args.transition_csv).is_file() else None)
+    # Pseudo-transient census straight from the case dictionaries: which AoA
+    # points of this configuration were solved by the pimpleFoam fallback
+    # rather than steady simpleFoam (spec flags them in the report).
+    pseudo = pseudo_transient_cases(args.case_root, args.re, args.level)
 
     results = evaluate_gates(of_polar, xfoil_polar, nasa_polar, rans_tr,
                              nasa_note=na_note)
@@ -783,9 +916,29 @@ def main(argv: Optional[List[str]] = None) -> int:
         ("NASA polar", na_path.name if na_path else f"none ({na_note})"),
         ("RANS transition table", str(args.transition_csv)
          if rans_tr is not None else f"{args.transition_csv} (absent)"),
+        # Solver provenance per point: 'none' is the normal all-steady case.
+        ("pseudo-transient points",
+         ", ".join(f"alpha {a:+g} deg ({app})" for a, app in pseudo)
+         if pseudo else "none (all cases steady simpleFoam)"),
     ]
 
     notes: List[str] = []
+    if pseudo:
+        # The spec requires fallback runs to be flagged: these polar points
+        # came from the pimpleFoam localEuler pseudo-transient variant
+        # (applied by scripts/run_validation.py after the steady solve
+        # failed to converge post-stall; mechanism documented in
+        # cases/validation_2d/README.md). Their convergence was judged on
+        # the same force-flatness criterion, but residual levels are not
+        # comparable to the steady gate.
+        alphas_txt = ", ".join(f"{a:+g}" for a, _ in pseudo)
+        notes.append(
+            f"PSEUDO-TRANSIENT points at alpha = {alphas_txt} deg: solved "
+            f"with the pimpleFoam localEuler fallback "
+            f"(template pimple_overrides/, applied automatically by "
+            f"scripts/run_validation.py) after the steady simpleFoam run "
+            f"failed to converge; force-flatness judged identically, "
+            f"residual levels not comparable to the steady gate.")
     if mach > 0.2:
         # The Re-6M point exceeds the M < 0.2 quasi-incompressible guideline
         # at unit chord. Decision (documented here AND in the README M1

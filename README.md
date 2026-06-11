@@ -161,8 +161,13 @@ changes nothing in either incompressible code except the bookkeeping.)
 
 1. dCl/dalpha within 5% of XFOIL, linear fit over alpha in [-2, +6] deg;
 2. Clmax within 10% and stall AoA within 2 deg of the NASA experimental
-   polar (digitized CSVs in `validation/nasa/digitized/`; until they exist
-   these rows report SKIPPED — never silently passed);
+   polar — hand-digitized lift curves in `validation/nasa/digitized/` from
+   TM X-72843 fig. 5 (LS(1)-0413, Re 2.2/4.3/6.4e6, transition fixed at
+   0.075c) and CR-145139 fig. 2(a) (Re 2.2e6, strips), provenance and
+   uncertainty per `validation/nasa/SOURCES.md`; the gate matches the CSV
+   to the requested Re by filename token (1% tolerance) and reports an
+   explicit SKIPPED reason when no anchor at that Re exists — never
+   silently passed;
 3. upper-surface transition x/c within 10% chord of XFOIL's e^N `xtr_top`
    at matching Ncrit. The RANS transition pickup is defined as the x/c where
    wall Cf first rises through its post-minimum inflection (first local

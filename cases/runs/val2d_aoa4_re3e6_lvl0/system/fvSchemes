@@ -21,10 +21,18 @@ ddtSchemes
 
 gradSchemes
 {
-    // cellLimited keeps reconstruction monotone in the few skewed cells the
-    // transfinite C-blocks produce around the nose, without degrading the
-    // second-order behaviour over the (near-orthogonal) BL region.
-    default         cellLimited Gauss linear 1;
+    // Default gradient is UNLIMITED Gauss linear: the transition-model
+    // scalars (gammaInt/ReThetat, plus k/omega feeding their correlations)
+    // keep full second-order gradients where the transition front lives --
+    // a blanket cellLimited default was found to be needless dissipation on
+    // exactly the fields this phase is validated on. grad(U) alone stays
+    // cellLimited: it feeds linearUpwind reconstruction and the production
+    // terms, and the few skewed cells the transfinite C-blocks produce
+    // around the nose are where velocity-gradient ringing actually starts.
+    // Planned one-time check at solver bring-up: rerun one level-1 case
+    // with 'default cellLimited Gauss linear 1' and confirm the transition
+    // location is insensitive to the limiter choice.
+    default         Gauss linear;
     grad(U)         cellLimited Gauss linear 1;
 }
 

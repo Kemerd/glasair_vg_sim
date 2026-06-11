@@ -8,14 +8,25 @@ Covers the contracts the milestone gates on:
     test recomputes the chain independently and compares), every cell-to-
     cell growth ratio <= 1.2, far field >= 25 chords, >= 30 cells inside
     the boundary-layer estimate, sqrt(2) refinement-level scaling.
+  * Blunt-base slab grading: the W_m transverse direction must meet the
+    W_u/W_l wake-cut corners at the y+ = 1 first cell (edge cell within 5%
+    of h1, ratio <= 1.2) at every (Re, level) combination -- the regression
+    for the 57x..218x corner size jump the uniform slab used to carry.
   * Template instantiation: every required case file is produced and no
     @TOKEN@ placeholder survives into the instantiated tree; Allrun stays
-    LF-only (it runs under WSL bash).
+    LF-only (it runs under WSL bash); decomposition ranks scale with the
+    refinement level; gradSchemes limits grad(U) only.
   * AoA frame rotation: liftDir/dragDir orthonormal and correct at 0 and
     10 degrees, with the freestream vector along dragDir.
   * Inlet turbulence chain: Mack inversion of Ncrit = 9 lands at the
     documented Tu ~ 0.07% and the Langtry-Menter correlation at that Tu
-    lands at the hand-computed Re_theta_t.
+    lands at the hand-computed Re_theta_t; the boundary k is pre-boosted by
+    the analytic freestream-decay factor so the LE-incident Tu round-trips
+    to the Mack value exactly.
+  * BL sampling: two lines per station (dense inner sublayer line + the
+    0.15c outer line), names round-trip through the extract_bl parser, and
+    a synthetic inner/outer pair MERGES into one profile whose integrals
+    recover the analytic sine-profile values.
 """
 
 from __future__ import annotations
@@ -30,6 +41,9 @@ import pytest
 from geometry.airfoil import load_airfoil, resample_airfoil
 from geometry.units import load_aircraft
 from scripts.build_validation_case import (
+    BETA_STAR,
+    BL_INNER_D99_FACTOR,
+    BL_INNER_SPACING,
     BL_STATIONS,
     CHORD,
     FARFIELD_RADIUS,
@@ -38,6 +52,7 @@ from scripts.build_validation_case import (
     N_AIRFOIL_POINTS,
     TOKEN_RE,
     WAKE_LENGTH,
+    _split_loop,
     aoa_directions,
     build_case,
     case_name,
@@ -47,6 +62,7 @@ from scripts.build_validation_case import (
     mack_tu_from_ncrit,
     plan_cgrid,
     sampling_set_entries,
+    subdomains_for_level,
 )
 from scripts.first_cell_height import first_cell_height
 
@@ -84,9 +100,18 @@ def coords():
 
 
 @pytest.fixture(scope="module")
-def plan0(atmo):
+def base_h(coords):
+    """Blunt-TE base opening measured from the resampled loop (~0.0055c),
+    exactly as build_case measures it before planning the grid."""
+    upper, lower = _split_loop(coords)
+    return float(upper[-1, 1] - lower[-1, 1])
+
+
+@pytest.fixture(scope="module")
+def plan0(atmo, base_h):
     """Level-0 mesh plan at the reference Re."""
-    return plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], level=0)
+    return plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], level=0,
+                      base_height=base_h)
 
 
 @pytest.fixture(scope="module")
@@ -161,9 +186,11 @@ class TestCGridGenerator:
         # No size jump across the surface/wake block interface.
         assert plan0.wake.first == pytest.approx(plan0.d_te, rel=1e-9)
 
-    def test_refinement_levels_scale_by_sqrt2(self, atmo, plan0):
-        plan1 = plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], 1)
-        plan2 = plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], 2)
+    def test_refinement_levels_scale_by_sqrt2(self, atmo, base_h, plan0):
+        plan1 = plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], 1,
+                           base_height=base_h)
+        plan2 = plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], 2,
+                           base_height=base_h)
         s = math.sqrt(2.0)
         # Surface counts step by sqrt(2) (integer rounding allowed)...
         assert plan1.n_surf == pytest.approx(plan0.n_surf * s, rel=0.02)
@@ -189,6 +216,66 @@ class TestCGridGenerator:
         # 2 surfaces x 2 z-planes of spline edges, plus 4 far polyLines.
         assert len(re.findall(r"^\s*spline\s", bmd_text, flags=re.M)) == 4
         assert len(re.findall(r"^\s*polyLine\s", bmd_text, flags=re.M)) == 4
+
+    def test_wm_base_multigrading_rendered(self, bmd_text, plan0):
+        # The W_m transverse direction must carry the symmetric two-zone
+        # multigrading verbatim: half the base / half the cells growing from
+        # the lower corner, mirrored (inverse expansion) into the upper one.
+        g = f"{plan0.base.grading:.10g}"
+        g_inv = f"{1.0 / plan0.base.grading:.10g}"
+        expected = (f"( (0.5 {plan0.base.n} {g}) "
+                    f"(0.5 {plan0.base.n} {g_inv}) )")
+        assert expected in bmd_text
+        # The old uniform-slab grading must be gone: no '( g_wake 1 1 )'.
+        assert f"( {plan0.wake.grading:.10g} 1 1 )" not in bmd_text
+
+
+# -----------------------------------------------------------------------------
+#  Blunt-base slab grading (W_m transverse direction)
+# -----------------------------------------------------------------------------
+#  Regression for the wake-slab discontinuity: a uniform run across the
+#  0.0055c base met the W_u/W_l y+ = 1 first cell with a 57x (Re 1.5M) to
+#  218x (Re 6M) wall-normal size jump on the shared wake-cut faces. The
+#  symmetric two-zone grading must land the edge cell ON h1 (within 5%)
+#  with the cell-to-cell ratio capped at 1.2 -- at EVERY (Re, level) combo
+#  of the sweep, since both h1 and the level scaling move the solve.
+
+class TestBaseSlabGrading:
+    @pytest.mark.parametrize("re_t", [1.5e6, 3.0e6, 6.0e6])
+    @pytest.mark.parametrize("level", [0, 1, 2])
+    def test_edge_cell_matches_h1_within_5pct_and_cap(self, atmo, base_h,
+                                                      re_t, level):
+        plan = plan_cgrid(re_t, atmo["nu"], atmo["rho"], atmo["T"], level,
+                          base_height=base_h)
+        b = plan.base
+        # Spec growth-ratio cap holds on the base run too.
+        assert b.ratio <= GROWTH_CAP + 1e-9
+        # Edge cell RECOMPUTED from the rendered numbers (count + ratio over
+        # the half base) -- the audit must not trust b.first, it re-derives
+        # the size the dictionary actually produces at the corner.
+        if b.ratio > 1.0 + 1e-12:
+            h_edge = b.length * (b.ratio - 1.0) / (b.ratio ** b.n - 1.0)
+        else:
+            h_edge = b.length / b.n
+        assert h_edge == pytest.approx(plan.h1, rel=0.05)
+        # Symmetric halves: the rendered total is exactly two half-runs.
+        assert plan.n_base == 2 * b.n
+        assert b.length == pytest.approx(0.5 * base_h, rel=1e-12)
+
+    def test_reference_cell_budget(self, atmo, base_h):
+        # The documented budget point: ~46 cells across the base at the
+        # reference condition (Re 3M, level 0) -- a ~+7% whole-mesh cost.
+        plan = plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], 0,
+                          base_height=base_h)
+        assert 40 <= plan.n_base <= 52
+
+    def test_mismatched_base_height_is_rejected(self, coords, atmo, base_h):
+        # generate_blockmeshdict must refuse a plan solved for a different
+        # base opening than the loop being meshed (silent corner mismatch).
+        plan = plan_cgrid(RE_REF, atmo["nu"], atmo["rho"], atmo["T"], 0,
+                          base_height=2.0 * base_h)
+        with pytest.raises(ValueError, match="base height"):
+            generate_blockmeshdict(coords, plan)
 
 
 # -----------------------------------------------------------------------------
@@ -244,11 +331,38 @@ class TestInletTurbulence:
     def test_chain_consistency(self, atmo):
         u = RE_REF * atmo["nu"] / CHORD
         t = inlet_turbulence(u, atmo["nu"])
-        # k from the isotropic definition at the Mack Tu...
-        assert t["k"] == pytest.approx(1.5 * (t["tu"] * u) ** 2, rel=1e-12)
-        # ...and omega from the documented nut/nu = 10 inlet ratio.
+        # LE-incident TARGET pair: isotropic k at the Mack Tu, and omega
+        # from the documented nut/nu = 10 ratio at that target state.
+        assert t["k_target"] == pytest.approx(1.5 * (t["tu"] * u) ** 2,
+                                              rel=1e-12)
+        assert t["k_target"] / (t["omega_target"] * atmo["nu"]) == \
+            pytest.approx(10.0, rel=1e-9)
+        # Analytic freestream-decay factor over the 25c approach, evaluated
+        # at the target-state omega (recomputed here independently).
+        decay = math.exp(-BETA_STAR * t["omega_target"]
+                         * FARFIELD_RADIUS * CHORD / u)
+        assert t["decay"] == pytest.approx(decay, rel=1e-12)
+        assert 0.0 < t["decay"] < 1.0
+        # BOUNDARY pair: k pre-boosted by the inverse decay factor, with the
+        # nut/nu = 10 ratio re-held on the boosted value.
+        assert t["k"] == pytest.approx(t["k_target"] / decay, rel=1e-12)
         assert t["k"] / (t["omega"] * atmo["nu"]) == pytest.approx(10.0,
                                                                    rel=1e-9)
+        # Sanity on the magnitude at Re 3M: the boost is a ~1.6x factor
+        # (decay ~0.61), i.e. material -- skipping the compensation would
+        # have the LE see ~0.78x the target intensity.
+        assert 1.0 / t["decay"] == pytest.approx(1.64, abs=0.05)
+
+    @pytest.mark.parametrize("re_t", [1.5e6, 3.0e6, 6.0e6])
+    def test_decayed_le_tu_round_trips_to_mack(self, atmo, re_t):
+        # The point of the compensation: marching the boundary k through the
+        # analytic decay lands the LE-incident Tu on the Mack Ncrit-9 value
+        # EXACTLY (within the constant-omega decay model), at every sweep Re.
+        u = re_t * atmo["nu"] / CHORD
+        t = inlet_turbulence(u, atmo["nu"])
+        k_le = t["k"] * t["decay"]
+        tu_le = math.sqrt(2.0 * k_le / 3.0) / u
+        assert tu_le == pytest.approx(mack_tu_from_ncrit(9.0), rel=1e-9)
 
 
 # -----------------------------------------------------------------------------
@@ -256,30 +370,107 @@ class TestInletTurbulence:
 # -----------------------------------------------------------------------------
 
 class TestSamplingLines:
-    def test_one_entry_per_station_upper_surface(self, coords):
-        text = sampling_set_entries(coords, math.radians(4.0))
+    def test_two_entries_per_station_upper_surface(self, coords, plan0):
+        text = sampling_set_entries(coords, math.radians(4.0), plan0.d99)
         # Set names follow the extract_bl contract: 'bl_x<percent digits>'
-        # ('bl_x007' = 7% chord), one entry per Phase-1 station.
-        names = re.findall(r"\bbl_x\d{3}\b", text)
-        assert len(names) == len(BL_STATIONS)
+        # ('bl_x007' = 7% chord) for the outer line plus a '_inner' sibling
+        # per station. (\b does not fire between digit and underscore, so
+        # the outer pattern cannot accidentally count the inner names.)
+        outer = re.findall(r"\bbl_x\d{3}\b", text)
+        inner = re.findall(r"\bbl_x\d{3}_inner\b", text)
+        assert len(outer) == len(BL_STATIONS)
+        assert len(inner) == len(BL_STATIONS)
         # Positive AoA: suction side is the UPPER surface; the wall-normal
         # lines must point upward (end y above the surface anchor y).
         assert "upper (suction) surface" in text
 
-    def test_set_names_round_trip_through_extract_bl(self, coords):
-        # Cross-module contract lock: every set name the builder emits must
-        # decode back to its station through the BL-extraction parser (the
-        # consumer of these sample files), or the whole VG-sizing table
-        # would silently come out empty/mis-stationed.
-        from scripts.extract_bl import parse_station_token
-        text = sampling_set_entries(coords, math.radians(4.0))
-        names = re.findall(r"\bbl_x\d{3}\b", text)
-        decoded = sorted(parse_station_token(f"{n}_U") for n in names)
-        assert decoded == [pytest.approx(s, abs=1e-9) for s in BL_STATIONS]
+    def test_inner_line_length_and_pitch(self, coords, plan0):
+        # The inner line exists to sample the resolved sublayer: ~2x the
+        # d99 estimate long at ~1e-5 m pitch (vs 2.5e-4 m on the outer line,
+        # which steps clean over the ~8e-6 m first cell).
+        text = sampling_set_entries(coords, math.radians(4.0), plan0.d99)
+        m = re.search(
+            r"bl_x010_inner\s*\{.*?start\s+\(([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+"
+            r"[-+0-9.eE]+\);.*?end\s+\(([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+"
+            r"[-+0-9.eE]+\);.*?nPoints\s+(\d+);",
+            text, flags=re.S)
+        assert m, "bl_x010_inner entry not found"
+        sx, sy, ex, ey = (float(m.group(i)) for i in range(1, 5))
+        npts = int(m.group(5))
+        length = math.hypot(ex - sx, ey - sy)
+        # Length: the requested multiple of the d99 estimate (the 1e-6 m
+        # wall offset on the start point is negligible at this scale).
+        assert length == pytest.approx(BL_INNER_D99_FACTOR * plan0.d99,
+                                       rel=0.001)
+        # Pitch: the uniform spacing the point count realizes.
+        assert length / (npts - 1) == pytest.approx(BL_INNER_SPACING,
+                                                    rel=0.02)
 
-    def test_negative_aoa_uses_lower_surface(self, coords):
-        text = sampling_set_entries(coords, math.radians(-4.0))
+    def test_set_names_round_trip_through_extract_bl(self, coords, plan0):
+        # Cross-module contract lock: every set name the builder emits --
+        # inner AND outer -- must decode back to its station through the
+        # BL-extraction parser (the consumer of these sample files), or the
+        # whole VG-sizing table would silently come out empty/mis-stationed.
+        from scripts.extract_bl import parse_station_token
+        text = sampling_set_entries(coords, math.radians(4.0), plan0.d99)
+        outer = re.findall(r"\bbl_x\d{3}\b", text)
+        inner = re.findall(r"\bbl_x\d{3}_inner\b", text)
+        for names in (outer, inner):
+            decoded = sorted(parse_station_token(f"{n}_U") for n in names)
+            assert decoded == [pytest.approx(s, abs=1e-9)
+                               for s in BL_STATIONS]
+
+    def test_negative_aoa_uses_lower_surface(self, coords, plan0):
+        text = sampling_set_entries(coords, math.radians(-4.0), plan0.d99)
         assert "lower (suction) surface" in text
+
+    def test_inner_outer_profiles_merge_in_extract_bl(self, tmp_path):
+        """Round trip of the two-line scheme through the extract_bl reader.
+
+        Fabricates the sine profile (closed-form delta99/delta*/theta) the
+        way the case writes it: a COARSE outer line (600 points over 0.15c,
+        2.5e-4 m pitch -- the resolved sublayer falls entirely between its
+        first two samples) plus a DENSE inner line (1e-5 m pitch to 2x
+        delta). The reader must merge both into one profile and recover the
+        analytic integrals; either line alone caps n_points well below the
+        merged count, so the count also proves the merge actually happened.
+        """
+        from scripts.extract_bl import extract_case
+        delta, u_e = 0.008, 43.8
+        sine = lambda n: np.where(n < delta,
+                                  u_e * np.sin(0.5 * np.pi * n / delta), u_e)
+
+        def raw_xy(n):
+            u = sine(n)
+            return "\n".join(f"{ni:.8e}\t{ui:.8e}\t0.0\t0.0"
+                             for ni, ui in zip(n, u)) + "\n"
+
+        n_outer = np.linspace(1.0e-6, 0.15, 600)          # case outer line
+        n_inner = np.arange(1.0e-6, 2.0 * delta, 1.0e-5)  # case inner line
+        fo = tmp_path / "aoa_p04" / "postProcessing" / "blProfiles" / "2000"
+        fo.mkdir(parents=True)
+        (fo / "bl_x010_U.xy").write_text(raw_xy(n_outer), encoding="utf-8")
+        (fo / "bl_x010_inner_U.xy").write_text(raw_xy(n_inner),
+                                               encoding="utf-8")
+
+        stations = extract_case(tmp_path / "aoa_p04")
+        assert len(stations) == 1
+        st = stations[0]
+        assert st.x_over_c == pytest.approx(0.10)
+        # Both files merged: count exceeds what either line alone provides
+        # (inner ~1600 + outer 600 + wall anchor), and the provenance lists
+        # the pair with the outer line as the primary source.
+        assert st.metrics.n_points > 2000
+        assert len(st.sources) == 2
+        assert st.source.name == "bl_x010_U.xy"
+        # The merged profile recovers the analytic sine-profile integrals
+        # (same 1% bar as the extract_bl unit tests).
+        assert st.metrics.delta99 == pytest.approx(
+            (2.0 / math.pi) * math.asin(0.99) * delta, rel=0.01)
+        assert st.metrics.delta_star == pytest.approx(
+            (1.0 - 2.0 / math.pi) * delta, rel=0.01)
+        assert st.metrics.theta == pytest.approx(
+            (2.0 / math.pi - 0.5) * delta, rel=0.01)
 
 
 # -----------------------------------------------------------------------------
@@ -359,6 +550,45 @@ class TestCaseInstantiation:
         raw = (case_dir / "Allrun").read_bytes()
         # bash under WSL rejects CRLF scripts; the builder pins LF.
         assert b"\r" not in raw
+
+    def test_decompose_ranks_scale_with_level(self, built):
+        # The dictionary value is the single authority Allrun reads back
+        # with foamDictionary; a level-0 build must carry 2 ranks.
+        case_dir, _ = built
+        text = (case_dir / "system" / "decomposeParDict").read_text(
+            encoding="utf-8")
+        assert "numberOfSubdomains 2;" in text
+        assert "scotch;" in text
+        # The mapping itself: 2/4/8 at levels 0/1/2, nothing else accepted.
+        assert [subdomains_for_level(lv) for lv in (0, 1, 2)] == [2, 4, 8]
+        with pytest.raises(ValueError):
+            subdomains_for_level(3)
+
+    def test_fvschemes_limits_grad_u_only(self, built):
+        # Gradient limiting is confined to grad(U); the default gradient
+        # stays plain Gauss linear so the transition scalars keep full
+        # second-order behaviour (the quantity this phase validates on).
+        case_dir, _ = built
+        text = (case_dir / "system" / "fvSchemes").read_text(encoding="utf-8")
+        assert re.search(r"default\s+Gauss linear;", text)
+        assert re.search(r"grad\(U\)\s+cellLimited Gauss linear 1;", text)
+        # The pseudo-transient fallback variant must mirror the same split
+        # (its header promises identity outside ddtSchemes).
+        var = (case_dir / "pimple_overrides" / "fvSchemes").read_text(
+            encoding="utf-8")
+        assert re.search(r"default\s+Gauss linear;", var)
+        assert re.search(r"grad\(U\)\s+cellLimited Gauss linear 1;", var)
+
+    def test_inlet_k_is_decay_boosted(self, built, atmo):
+        # 0/k must carry the decay-compensated boundary value, not the raw
+        # Mack-level k -- and the boost must be a real (> 1) factor.
+        case_dir, plan = built
+        t = inlet_turbulence(plan.u_inf, atmo["nu"])
+        text = (case_dir / "0" / "k").read_text(encoding="utf-8")
+        m = re.search(r"internalField\s+uniform\s+([-+0-9.eE]+);", text)
+        assert m, "internalField not found in 0/k"
+        assert float(m.group(1)) == pytest.approx(t["k"], rel=1e-4)
+        assert t["k"] > t["k_target"]
 
     def test_rebuild_requires_force(self, built):
         case_dir, _ = built

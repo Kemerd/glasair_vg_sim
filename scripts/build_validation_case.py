@@ -109,16 +109,31 @@ SURF_ZONES = (
     (0.55, 0.36, 1.0),       # mid chord: uniform
     (0.25, 0.30, 0.2),       # TE cluster: shrinks into the trailing edge
 )
-N_BASE_CELLS = 6             # cells across the 0.0055c blunt-TE base, level 0
 
 # Wall-normal BL sample stations for the Phase-1 delta/delta* extraction
-# (suction surface), plus line length and resolution. 0.15c comfortably
-# clears the BL edge even at high AoA aft stations.
+# (suction surface). TWO lines per station (naming contract shared with
+# scripts/extract_bl.py, which merges them before integrating):
+#   * inner 'bl_x###_inner': dense near-wall line, BL_INNER_D99_FACTOR x the
+#     flat-plate d99 estimate long at ~BL_INNER_SPACING point pitch -- the
+#     resolved viscous sublayer (first cell ~1e-5 m at Re 3M) actually gets
+#     sampled instead of falling between two coarse points;
+#   * outer 'bl_x###': the original 0.15c / 600-point line that captures the
+#     BL edge and the outer flow the edge-finder guard needs. 0.15c clears
+#     the BL edge comfortably even at high AoA aft stations.
 BL_STATIONS = (0.05, 0.07, 0.10, 0.15, 0.20, 0.30,
                0.40, 0.50, 0.60, 0.70, 0.80, 0.90)
-BL_LINE_LENGTH = 0.15        # chords, along the local outward surface normal
-BL_LINE_POINTS = 600         # uniform samples per line
+BL_LINE_LENGTH = 0.15        # chords, outer line, along the local outward normal
+BL_LINE_POINTS = 600         # uniform samples on the outer line
+BL_INNER_D99_FACTOR = 2.0    # inner-line length as a multiple of the d99 estimate
+BL_INNER_SPACING = 1.0e-5    # m; inner-line point pitch (~the Re 3M first cell)
 BL_WALL_OFFSET = 1.0e-6      # m; start a hair off the wall, inside cell 1
+
+# Parallel decomposition: MPI ranks per refinement level (lvl 0/1/2). The 2D
+# cell budget roughly doubles per level (~27k/54k/107k cells), so doubling the
+# rank count holds the per-core load near ~13k cells at every level -- above
+# the ~10k cells/core point where MPI overhead starts eating the speedup. A
+# flat 8 ranks (the original choice) starved level 0 at ~3.4k cells/core.
+SUBDOMAINS_BY_LEVEL = {0: 2, 1: 4, 2: 8}
 
 # Template/output locations and the placeholder-token grammar shared with
 # the tests (any surviving @NAME@ after instantiation is a build failure).
@@ -236,7 +251,9 @@ class MeshPlan:
     d_le: float                  # finest LE streamwise spacing
     d_te: float                  # finest TE streamwise spacing
     wake: GradedRun              # wake streamwise run (TE -> outlet)
-    n_base: int                  # cells across the blunt-TE base (uniform)
+    base: GradedRun              # HALF of the blunt-TE base, corner -> midline
+                                 # (symmetric two-zone multigrading; first = h1)
+    n_base: int                  # total cells across the base (= 2 * base.n)
     n_cells_total: int           # whole-mesh cell count (one z layer)
 
 
@@ -269,7 +286,7 @@ def _solve_surface_zones(n_surf: int) -> Tuple[SurfZone, ...]:
 
 
 def plan_cgrid(re_target: float, nu: float, rho: float, temperature: float,
-               level: int) -> MeshPlan:
+               level: int, base_height: float) -> MeshPlan:
     """Solve every discretisation number for one (Re, level) C-grid.
 
     The wall-normal chain: first-cell height from the M0 correlation script
@@ -278,9 +295,16 @@ def plan_cgrid(re_target: float, nu: float, rho: float, temperature: float,
     flat-plate d99 estimate; the cell count follows from spanning the 25c
     far-field distance, and the ratio is re-solved exactly for that count so
     the meshed first cell IS the correlation value.
+
+    ``base_height`` is the MEASURED blunt-TE base opening (yu - yl of the
+    resampled loop, ~0.0055c for the as-built LS(1)-0413), passed in rather
+    than assumed so the base-slab grading below always matches the geometry
+    actually being meshed.
     """
     if level not in (0, 1, 2):
         raise ValueError(f"refinement level must be 0, 1 or 2, got {level}")
+    if base_height <= 0.0:
+        raise ValueError(f"base_height must be positive, got {base_height}")
 
     # Freestream speed from the series convention U = Re * nu / c, and the
     # Mach bookkeeping for the compressibility note (sea-level sound speed).
@@ -343,11 +367,28 @@ def plan_cgrid(re_target: float, nu: float, rho: float, temperature: float,
         first=d_te, last=d_te * r_wake ** (n_wake - 1), length=WAKE_LENGTH,
     )
 
-    # Blunt-base block: uniform cells across the 0.0055c base. Documented
-    # compromise (see case README): the base wall is resolved by the wake's
-    # streamwise spacing, not to y+ < 1 -- it sits in dead-air recirculation
-    # where u_tau is tiny, and the yPlus function object writes the evidence.
-    n_base = max(N_BASE_CELLS, int(round(N_BASE_CELLS * scale)))
+    # Blunt-base slab (W_m), transverse direction: the W_u/W_l blocks meet
+    # the wake-cut lines with the y+ = 1 first cell h1, so a uniform run
+    # across the base would jump 57x..218x in wall-normal size at the two
+    # shared corners (Re 1.5M..6M). Instead the base gets a SYMMETRIC
+    # two-zone multigrading: each half runs from h1 at its corner toward a
+    # coarse midline at a cell-to-cell ratio capped at GROWTH_CAP, solved
+    # exactly so the edge cell IS h1 (same count-then-exact-ratio discipline
+    # as the wall-normal run, including the sqrt(2) level scaling). The base
+    # wall itself remains resolved by the wake's streamwise spacing (dead-air
+    # recirculation; the yPlus function object writes the evidence).
+    half_base = 0.5 * base_height
+    n_bhalf0 = max(2, _count_for_ratio(y1, half_base, GROWTH_CAP))
+    n_bhalf = int(math.ceil(n_bhalf0 * scale))
+    r_base = _ratio_for_count(h1, half_base, n_bhalf)
+    if r_base > GROWTH_CAP + 1.0e-9:
+        raise RuntimeError(
+            f"base growth ratio {r_base:.4f} exceeds cap {GROWTH_CAP}")
+    base = GradedRun(
+        n=n_bhalf, ratio=r_base, grading=r_base ** (n_bhalf - 1),
+        first=h1, last=h1 * r_base ** (n_bhalf - 1), length=half_base,
+    )
+    n_base = 2 * n_bhalf
 
     # Whole-mesh budget: 2 surface blocks + 2 wake blocks + base block.
     n_cells = 2 * n_surf * n_norm + 2 * n_wake * n_norm + n_wake * n_base
@@ -356,7 +397,7 @@ def plan_cgrid(re_target: float, nu: float, rho: float, temperature: float,
         re=re_target, u_inf=u_inf, mach=mach, level=level,
         y1_correlation=y1, h1=h1, d99=d99, normal=normal,
         layers_in_d99=layers, n_surf=n_surf, zones=zones,
-        d_le=d_le, d_te=d_te, wake=wake, n_base=n_base,
+        d_le=d_le, d_te=d_te, wake=wake, base=base, n_base=n_base,
         n_cells_total=n_cells,
     )
 
@@ -465,6 +506,13 @@ def generate_blockmeshdict(coords: np.ndarray, plan: MeshPlan) -> str:
     yl = float(lower[-1, 1])
     if yu <= yl:
         raise ValueError("expected an open blunt TE (upper above lower)")
+    # The base-slab grading in the plan was solved for a specific base
+    # opening; meshing a loop with a different one would silently break the
+    # h1 corner match, so a mismatch is a hard error, not a warning.
+    if not math.isclose(yu - yl, 2.0 * plan.base.length, rel_tol=1.0e-6):
+        raise ValueError(
+            f"plan base height {2.0 * plan.base.length:.6e} does not match "
+            f"the loop's TE opening {yu - yl:.6e}")
 
     R = FARFIELD_RADIUS
     x_out = CHORD + WAKE_LENGTH
@@ -495,6 +543,14 @@ def generate_blockmeshdict(coords: np.ndarray, plan: MeshPlan) -> str:
     g_wake_rev = _fmt(1.0 / plan.wake.grading)
     n_srf, n_nrm = plan.n_surf, plan.normal.n
     n_wke, n_bse = plan.wake.n, plan.n_base
+    # W_m transverse multigrading: lower half grows from h1 at the W_l
+    # corner toward the midline, upper half mirrors it back down to h1 at
+    # the W_u corner -- both shared faces continue the y+ = 1 first cell of
+    # the neighbouring wake blocks with no size jump.
+    g_base = _fmt(plan.base.grading)
+    g_base_rev = _fmt(1.0 / plan.base.grading)
+    n_bh = plan.base.n
+    base_grading = (f"( (0.5 {n_bh} {g_base}) (0.5 {n_bh} {g_base_rev}) )")
     blocks = f"""    // S_u: upper surface -> far field. x1 = LE->TE along the wall
     // (multigraded: LE/TE clusters), x2 = wall->far (first cell from the
     // y+ chain, geometric growth, ratio {_fmt(plan.normal.ratio)}).
@@ -519,10 +575,13 @@ def generate_blockmeshdict(coords: np.ndarray, plan: MeshPlan) -> str:
     hex (7 2 5 9 17 12 15 19) ({n_wke} {n_nrm} 1)
     simpleGrading ( {g_wake_rev} {g_norm} 1 )
 
-    // W_m: slab behind the blunt base (left face = the base wall). Uniform
-    // across the base; streamwise identical to W_u.
+    // W_m: slab behind the blunt base (left face = the base wall);
+    // streamwise identical to W_u. Transverse (x2 = lower cut -> upper cut):
+    // symmetric two-zone multigrading, edge cells = h1 at BOTH corners so
+    // the shared wake-cut faces match W_l/W_u cell-for-cell (ratio
+    // {_fmt(plan.base.ratio)}, cap {_fmt(GROWTH_CAP)}, {n_bse} cells across the base).
     hex (2 7 6 1 12 17 16 11) ({n_wke} {n_bse} 1)
-    simpleGrading ( {g_wake} 1 1 )"""
+    simpleGrading ( {g_wake} {base_grading} 1 )"""
 
     # ---- edges ---------------------------------------------------------------
     # Airfoil surface: spline edges through the resampled points (interior
@@ -617,8 +676,9 @@ FoamFile
 // scripts/first_cell_height.py, scaled 1/sqrt(2) per level), wall-normal
 // ratio {_fmt(plan.normal.ratio)} over {plan.normal.n} cells ({plan.layers_in_d99} inside the
 // d99 estimate {_fmt(plan.d99)} m; spec floor {MIN_BL_LAYERS}). Wake ratio {_fmt(plan.wake.ratio)}
-// over {plan.wake.n} cells from the TE spacing {_fmt(plan.d_te)} m. Total
-// {plan.n_cells_total} cells.
+// over {plan.wake.n} cells from the TE spacing {_fmt(plan.d_te)} m. Blunt base:
+// {plan.n_base} cells, symmetric two-zone grading from h1 at both corners
+// (ratio {_fmt(plan.base.ratio)}). Total {plan.n_cells_total} cells.
 
 scale   1.0;
 
@@ -699,36 +759,88 @@ def langtry_rethetat(tu_percent: float) -> float:
 
 
 def inlet_turbulence(u_inf: float, nu: float) -> Dict[str, float]:
-    """Full inlet chain: Ncrit -> Tu -> (k, omega, ReThetat).
+    """Full inlet chain: Ncrit -> Tu -> (k, omega, ReThetat), decay-compensated.
 
-    k from the isotropic definition, omega from the eddy-viscosity ratio
-    (TURB_VISC_RATIO = 10, top of the recommended band, chosen to MINIMIZE
-    freestream Tu decay over the 25c approach -- rationale in 0/omega).
+    The Mack Tu is the LE-INCIDENT target, but k set at the far boundary
+    decays in the freestream before it reaches the airfoil: with U uniform
+    along the 25c approach the k transport equation reduces to
+
+        dk/dx = -beta* k omega / U   ->   k(LE) = k(0) exp(-beta* omega L / U)
+
+    so the BOUNDARY value is the target divided by that analytic decay
+    factor, evaluated with omega at the target state (k_target at the
+    nut/nu = 10 eddy-viscosity ratio -- top of the Langtry-Menter 1..10
+    band, the slowest-decay end). The boundary omega is then recomputed
+    from the boosted k so the inlet eddy-viscosity ratio stays at the
+    documented 10. Returned values:
+
+        k_target / omega_target -- the LE-incident pair the decay model
+                                   integrates toward
+        decay                   -- exp(-beta* omega_target 25c / U)
+        k / omega               -- the boundary-condition pair actually
+                                   written into 0/k and 0/omega
+        rethetat                -- Langtry-Menter correlation at the TARGET
+                                   (LE-incident) Tu, i.e. the Mack value
     """
     tu = mack_tu_from_ncrit(NCRIT)
-    k = 1.5 * (tu * u_inf) ** 2
-    omega = k / (nu * TURB_VISC_RATIO)
+    k_target = 1.5 * (tu * u_inf) ** 2
+    omega_target = k_target / (nu * TURB_VISC_RATIO)
+
+    # Analytic freestream decay over the approach length (25 chords).
+    approach = FARFIELD_RADIUS * CHORD
+    decay = math.exp(-BETA_STAR * omega_target * approach / u_inf)
+
+    # Pre-boost the boundary k so the decayed LE value lands on the target;
+    # boundary omega keeps the nut/nu = 10 definition on the boosted k.
+    k_inlet = k_target / decay
+    omega_inlet = k_inlet / (nu * TURB_VISC_RATIO)
     return {
         "tu": tu,
         "tu_percent": 100.0 * tu,
-        "k": k,
-        "omega": omega,
+        "k_target": k_target,
+        "omega_target": omega_target,
+        "decay": decay,
+        "k": k_inlet,
+        "omega": omega_inlet,
         "rethetat": langtry_rethetat(100.0 * tu),
     }
 
 
-def sampling_set_entries(coords: np.ndarray, alpha_rad: float) -> str:
+def sampling_set_entries(coords: np.ndarray, alpha_rad: float,
+                         d99: float) -> str:
     """Render the wall-normal BL sample-line entries for system/sampling.
 
     Lines anchor on the SUCTION surface: upper for alpha >= 0, lower for
-    negative AoA (the spec sweep dips to -4 deg). Each line starts a hair
-    off the wall (inside the first cell) and runs BL_LINE_LENGTH chords
-    along the local outward surface normal, computed from a spline of the
-    same resampled loop the mesh was built from.
+    negative AoA (the spec sweep dips to -4 deg). Each station gets TWO
+    lines along the local outward surface normal (computed from a spline of
+    the same resampled loop the mesh was built from), both starting a hair
+    off the wall:
+
+      * inner 'bl_x###_inner': BL_INNER_D99_FACTOR * d99 long at
+        ~BL_INNER_SPACING pitch. The outer line's 600 points over 0.15c put
+        ~2.5e-4 m between samples while the y+ = 1 first cell is ~8e-6 m;
+        the entire resolved sublayer would fall between the first two
+        samples and the integral thicknesses would lean on the synthetic
+        wall anchor alone. The inner line samples it for real.
+      * outer 'bl_x###': BL_LINE_LENGTH chords / BL_LINE_POINTS points,
+        capturing the BL edge and the outer flow the edge finder needs.
+
+    Set-naming CONTRACT with scripts/extract_bl.py (its module docstring is
+    the authority): station as PERCENT digits ('bl_x007' = 7% chord), with
+    an optional '_inner' suffix; the extractor MERGES the pair (sorted by
+    wall distance, deduplicated) before integrating. ``d99`` is the
+    flat-plate TE estimate from the mesh plan -- an upper bound over the
+    stations, so every inner line clears its local BL edge.
     """
     upper, lower = _split_loop(coords)
     on_upper = alpha_rad >= 0.0
     surf = upper if on_upper else lower
+    side = "upper" if on_upper else "lower"
+
+    # Inner-line discretisation: ~BL_INNER_SPACING pitch over 2x the BL
+    # thickness estimate (+1 turns interval count into point count).
+    inner_len = BL_INNER_D99_FACTOR * d99
+    inner_pts = int(round(inner_len / BL_INNER_SPACING)) + 1
 
     # y(x) spline of the chosen surface; x is strictly increasing along a
     # resampled surface, so the derivative is well-defined at each station.
@@ -745,29 +857,43 @@ def sampling_set_entries(coords: np.ndarray, alpha_rad: float) -> str:
         norm = math.hypot(1.0, dy)
         nx, ny = (-dy / norm, 1.0 / norm) if on_upper else (dy / norm, -1.0 / norm)
         sx, sy = xc + BL_WALL_OFFSET * nx, y + BL_WALL_OFFSET * ny
-        ex, ey = xc + BL_LINE_LENGTH * nx, y + BL_LINE_LENGTH * ny
-        # Set-naming CONTRACT with scripts/extract_bl.py (its module docstring
-        # is the authority): 'bl_x<station>' with the station as PERCENT
-        # digits -- 'bl_x007' = 7% chord, 'bl_x090' = 90% chord. The percent
-        # encoding is exact for every Phase-1 station (all multiples of 1%).
-        name = f"bl_x{int(round(xc * 100)):03d}"
-        entries.append(
-            f"        {name}\n"
-            f"        {{\n"
-            f"            // x/c = {xc:.2f} on the {'upper' if on_upper else 'lower'} (suction) surface\n"
-            f"            type    uniform;\n"
-            f"            axis    distance;\n"
-            f"            start   {_vec(sx, sy, z_mid)};\n"
-            f"            end     {_vec(ex, ey, z_mid)};\n"
-            f"            nPoints {BL_LINE_POINTS};\n"
-            f"        }}"
-        )
+        base_name = f"bl_x{int(round(xc * 100)):03d}"
+        # (name suffix, line length in m, point count, role comment)
+        for suffix, length, npts, role in (
+            ("_inner", inner_len, inner_pts, "inner sublayer line"),
+            ("", BL_LINE_LENGTH, BL_LINE_POINTS, "outer line"),
+        ):
+            ex, ey = xc + length * nx, y + length * ny
+            entries.append(
+                f"        {base_name}{suffix}\n"
+                f"        {{\n"
+                f"            // x/c = {xc:.2f} on the {side} (suction) surface -- {role}\n"
+                f"            type    uniform;\n"
+                f"            axis    distance;\n"
+                f"            start   {_vec(sx, sy, z_mid)};\n"
+                f"            end     {_vec(ex, ey, z_mid)};\n"
+                f"            nPoints {npts};\n"
+                f"        }}"
+            )
     return "\n".join(entries)
 
 
 # =============================================================================
 #  Naming, summary, template instantiation
 # =============================================================================
+
+def subdomains_for_level(level: int) -> int:
+    """MPI rank count for one refinement level (2/4/8 at lvl 0/1/2).
+
+    Single authority for the decomposition width: the value lands in
+    system/decomposeParDict via the @N_SUBDOMAINS@ token, and Allrun reads
+    it back with foamDictionary, so builder/dictionary/mpirun can never
+    drift apart. Rationale for the doubling lives at SUBDOMAINS_BY_LEVEL.
+    """
+    if level not in SUBDOMAINS_BY_LEVEL:
+        raise ValueError(f"refinement level must be 0, 1 or 2, got {level}")
+    return SUBDOMAINS_BY_LEVEL[level]
+
 
 def _fmt_re_tag(re_target: float) -> str:
     """Compact Re tag for names/READMEs: 3e6, 1.5e6; plain below 1e6.
@@ -808,7 +934,9 @@ def mesh_summary(plan: MeshPlan) -> str:
         f"wake run             : {plan.wake.n} cells, ratio "
         f"{plan.wake.ratio:.4f}, grading {plan.wake.grading:.1f}, "
         f"first = TE spacing",
-        f"blunt-TE base        : {plan.n_base} uniform cells across 0.0055c",
+        f"blunt-TE base        : {plan.n_base} cells across "
+        f"{2.0 * plan.base.length:.4g} m, symmetric two-zone grading, "
+        f"corner cells = h1, ratio {plan.base.ratio:.4f} (cap {GROWTH_CAP})",
         f"total cells          : {plan.n_cells_total}",
     ]
     return "\n".join(lines)
@@ -887,8 +1015,15 @@ def build_case(aoa_deg: float, re_target: float, level: int,
     coords = resample_airfoil(load_airfoil(airfoil_path),
                               n_points=N_AIRFOIL_POINTS, te="blunt")
 
+    # Blunt-TE base opening MEASURED from the loop being meshed (~0.0055c
+    # for the as-built section) -- the base-slab grading is solved against
+    # this exact value, never a hard-coded nominal.
+    upper, lower = _split_loop(coords)
+    base_height = float(upper[-1, 1] - lower[-1, 1])
+
     # Mesh plan + generated dictionary.
-    plan = plan_cgrid(re_target, nu, rho, temperature, level)
+    plan = plan_cgrid(re_target, nu, rho, temperature, level,
+                      base_height=base_height)
     blockmesh_text = generate_blockmeshdict(coords, plan)
 
     # Freestream vector and wind-frame coefficient axes for this AoA.
@@ -912,16 +1047,24 @@ def build_case(aoa_deg: float, re_target: float, level: int,
         "RHO": f"{rho:.6g}",
         "MACH": f"{plan.mach:.3f}",
         "TU_PERCENT": f"{turb['tu_percent']:.4g}",
+        # Boundary-condition pair (decay-compensated) plus the audit trail:
+        # the LE-incident targets and the analytic decay factor are written
+        # into the 0/k and 0/omega comments so a reviewer can re-derive
+        # K_INF = K_LE / DECAY_FACTOR from the case files alone.
         "K_INF": f"{turb['k']:.6g}",
         "OMEGA_INF": f"{turb['omega']:.6g}",
+        "K_LE": f"{turb['k_target']:.6g}",
+        "OMEGA_LE": f"{turb['omega_target']:.6g}",
+        "DECAY_FACTOR": f"{turb['decay']:.6g}",
         "RETHETAT_INF": f"{turb['rethetat']:.6g}",
         "DRAGX": f"{dirs['drag'][0]:.8g}",
         "DRAGY": f"{dirs['drag'][1]:.8g}",
         "LIFTX": f"{dirs['lift'][0]:.8g}",
         "LIFTY": f"{dirs['lift'][1]:.8g}",
         "AREF": f"{CHORD * Z_THICKNESS:.6g}",
+        "N_SUBDOMAINS": str(subdomains_for_level(level)),
         "MESH_SUMMARY": mesh_summary(plan),
-        "SAMPLING_SETS": sampling_set_entries(coords, alpha),
+        "SAMPLING_SETS": sampling_set_entries(coords, alpha, plan.d99),
     }
 
     case_dir = out_root / name

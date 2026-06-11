@@ -921,9 +921,18 @@ def yplus_verdict(case_dir: Union[str, Path],
     post = case_dir / "postProcessing"
     if post.is_dir():
         # Several restart segments may each carry a yPlus.dat; scanning in
-        # sorted order and keeping the last hit mirrors the keep-LAST rule
-        # the history loaders apply to restarts.
-        for dat in sorted(post.rglob("yPlus.dat")):
+        # NUMERIC start-time order and keeping the last hit mirrors the
+        # keep-LAST rule the history loaders apply to restarts. Lexical
+        # sorting would put segment '500' after '1000' and resurrect stale
+        # pre-restart stats, so the parent time directory is compared as a
+        # float (non-numeric parents sort first, i.e. weakest evidence).
+        def _seg_time(p: Path) -> Tuple[float, str]:
+            try:
+                return (float(p.parent.name), str(p))
+            except ValueError:
+                return (float("-inf"), str(p))
+
+        for dat in sorted(post.rglob("yPlus.dat"), key=_seg_time):
             got = _yplus_stats_from_dat(dat, patch)
             if got is not None:
                 stats, stats_src = got, dat

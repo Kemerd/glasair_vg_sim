@@ -160,7 +160,7 @@ def re_label(re_value: float) -> str:
     """Reynolds tag used in output filenames: 1.5e6 -> '1.5M', 3e6 -> '3M'.
 
     %g collapses trailing zeros so the names match the spec's file list
-    (polar_Re1.5M_free.csv etc.) without special-casing integral millions.
+    (polar_Re1.5M_N9_free.csv etc.) without special-casing integral millions.
     """
     return f"{re_value / 1.0e6:g}M"
 
@@ -512,9 +512,19 @@ def run_polar(argv: Sequence[str], coords: np.ndarray, re_value: float,
 #  Outputs: CSV, combined figure, README
 # =============================================================================
 
-def csv_name(re_value: float, transition: str) -> str:
-    """Output file naming contract: polar_Re{1.5|3|6}M_{free|trip}.csv."""
-    return f"polar_Re{re_label(re_value)}_{transition}.csv"
+def csv_name(re_value: float, transition: str, ncrit: float = 9.0) -> str:
+    """Output file naming contract: polar_Re{1.5|3|6}M_N{ncrit}_{free|trip}.csv.
+
+    The N token records the e^N amplification setting the polar was run at,
+    so the gate evaluator (validation/compare_gate.find_xfoil_polar) can
+    match a requested Ncrit by filename alone. Tripped polars carry the
+    token too: transition there is forced at the trip stations, but the run
+    setting is still part of the file's provenance and one uniform pattern
+    keeps the discovery glob simple. %g collapses '9.0' to 'N9'. Legacy
+    files without the token (polar_Re3M_free.csv) remain discoverable
+    through find_xfoil_polar's backward-compat fallback.
+    """
+    return f"polar_Re{re_label(re_value)}_N{ncrit:g}_{transition}.csv"
 
 
 def write_csv(path: Path, rows: Sequence[Dict[str, float]]) -> None:
@@ -637,6 +647,9 @@ def write_readme(out_dir: Path, results: Sequence[PolarResult], ncrit: float,
         f"  xtr = {XTR_TRIP[0]:g}/{XTR_TRIP[1]:g} (top/bottom).",
         f"* AoA schedule: {alphas[0]:g} to {alphas[-1]:g} deg "
         f"({len(alphas)} points; 2-deg steps to 8, 1-deg steps to 20 per spec).",
+        f"* File naming: polar_Re<tag>_N{ncrit:g}_<free|trip>.csv - the N token",
+        "  records the e^N setting so the gate evaluator matches Ncrit by",
+        "  filename; legacy names without the token remain discoverable.",
         "",
         "## Speed / Reynolds convention (all 2D cases this milestone)",
         "",
@@ -676,11 +689,11 @@ def write_readme(out_dir: Path, results: Sequence[PolarResult], ncrit: float,
         entries.sort(key=lambda t: t[0])
         skipped = ", ".join(f"{a:g}{tag}" for a, tag in entries) if entries else "-"
         lines.append(
-            f"| {csv_name(res.re_value, res.transition)} "
+            f"| {csv_name(res.re_value, res.transition, ncrit)} "
             f"| {len(res.rows)}/{len(alphas)} "
             f"| {peak['cl']:.3f} | {peak['alpha']:.1f} | {cd_min:.5f} | {skipped} |"
             if peak else
-            f"| {csv_name(res.re_value, res.transition)} | 0/{len(alphas)} "
+            f"| {csv_name(res.re_value, res.transition, ncrit)} | 0/{len(alphas)} "
             f"| - | - | - | all |"
         )
     lines += [
@@ -790,7 +803,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             res = run_polar(xfoil_argv, coords, re_value, transition,
                             args.ncrit, alphas, n_iter=args.iter)
             results.append(res)
-            write_csv(out_dir / csv_name(re_value, transition), res.rows)
+            write_csv(out_dir / csv_name(re_value, transition, args.ncrit),
+                      res.rows)
 
             # Per-polar console report: convergence census, peak, skips.
             peak = res.clmax_row

@@ -18,11 +18,17 @@ exact in 2D up to the (small inside the BL) wall-normal component -- the
 sample lines are wall-normal by construction.
 
 SAMPLING-LAYOUT CONTRACT (coordinated with the case template in
-cases/validation_2d/template/system/): each station is a line set named
-'bl_x<station>' sampling U from the wall outward, where <station> encodes
-the chord fraction either as percent digits ('bl_x007' = 7% c) or with 'p'
-or '.' as the decimal mark ('bl_x0p07', 'bl_x0.07'). Both OpenFOAM
-setFormats the template may emit are read:
+cases/validation_2d/template/system/): each station is one or more line
+sets named 'bl_x<station>[_inner|_outer]' sampling U from the wall outward,
+where <station> encodes the chord fraction either as percent digits
+('bl_x007' = 7% c) or with 'p' or '.' as the decimal mark ('bl_x0p07',
+'bl_x0.07'). The optional zone suffix is the template's two-line scheme: a
+dense '_inner' sublayer line (~1e-5 m pitch over ~2x d99) plus the plain
+outer line (0.15 c at coarse pitch) -- the outer pitch alone (~2.5e-4 m)
+would skip the entire resolved sublayer (first cell ~8e-6 m). ALL sets that
+decode to the same station are MERGED into a single profile (sorted by wall
+distance, exact-duplicate heights dropped) before any integration. Both
+OpenFOAM setFormats the template may emit are read:
 
     raw  ->  <set>_U.xy        whitespace columns: distance + Ux Uy Uz
                                (axis distance) or x y z + Ux Uy Uz (axis xyz);
@@ -117,9 +123,15 @@ _TRAPZ = getattr(np, "trapezoid", np.trapz)
 CASE_CHORD_M_DEFAULT = 1.0
 
 # Station token inside set/file names: 'bl' then 'x' then digits with an
-# optional 'p' or '.' decimal mark. Examples matched: bl_x007_U.xy,
-# bl_x0p07_U.csv, blProfiles_x0.35_U.xy, BL-x100_U.xy.
-STATION_RE = re.compile(r"(?i)(?:^|[_\-])bl[a-z]*[_\-]?x(?P<tok>\d+(?:[p.]\d+)?)")
+# optional 'p' or '.' decimal mark, then an OPTIONAL inner/outer zone suffix
+# (the template's two-line-per-station scheme). Examples matched:
+# bl_x007_U.xy, bl_x0p07_U.csv, blProfiles_x0.35_U.xy, BL-x100_U.xy,
+# bl_x007_inner_U.xy. The zone suffix is consumed by the match so the
+# field-list parser downstream never mistakes 'inner' for a sampled field.
+STATION_RE = re.compile(
+    r"(?i)(?:^|[_\-])bl[a-z]*[_\-]?x(?P<tok>\d+(?:[p.]\d+)?)"
+    r"(?P<zone>[_\-](?:inner|outer))?"
+)
 
 # Velocity must be among the sampled fields; raw set files always carry the
 # field names in the stem ('<set>_U.xy', '<set>_p_U.xy', ...).
@@ -157,7 +169,10 @@ class BLStation:
 
     x_over_c: float
     metrics: BLMetrics
-    source: Path         # the sample-set file the profile came from
+    source: Path         # primary sample-set file (outer line when paired)
+    # Every file merged into the profile (inner + outer lines of the
+    # two-line sampling scheme); a single-set station lists just `source`.
+    sources: Tuple[Path, ...] = ()
 
 
 # =============================================================================
@@ -270,7 +285,9 @@ def parse_station_token(name: str) -> Optional[float]:
 
     Encodings accepted (see module docstring): explicit decimals via '.' or
     'p' ('x0p07' -> 0.07), or plain digits read as PERCENT of chord when the
-    raw value exceeds 1 ('x007' -> 7 -> 0.07, 'x100' -> 1.0). Values that
+    raw value exceeds 1 ('x007' -> 7 -> 0.07, 'x100' -> 1.0), each with an
+    optional '_inner'/'_outer' zone suffix that does not change the station
+    ('bl_x007_inner' -> 0.07, same station as 'bl_x007'). Values that
     remain outside [0, 1] after the percent fallback are rejected -- a
     station off the chord is a naming bug, not data.
     """
@@ -406,20 +423,27 @@ def _latest_time_dir(fo_dir: Path) -> Optional[Path]:
     return best
 
 
-def discover_station_files(case_dir: Path) -> Dict[float, Path]:
-    """Map x/c station -> sample file for one case (latest time, csv first).
+def discover_station_files(case_dir: Path) -> Dict[float, List[Path]]:
+    """Map x/c station -> sample files for one case (latest time, csv first).
 
     Walks every function-object directory under postProcessing/, keeps the
     latest time directory of each, and collects files that (a) carry a
-    parseable station token and (b) sample U. When both formats exist for a
-    station the csv wins (self-describing header beats filename heuristics);
-    across function objects the first (sorted) provider wins deterministically.
+    parseable station token and (b) sample U. A station may be served by
+    SEVERAL distinct sets (the template's 'bl_x###_inner' + 'bl_x###' pair);
+    all of them are returned, sorted by set name (outer/unsuffixed first),
+    for the caller to merge. Per individual SET the csv format wins over the
+    .xy twin (self-describing header beats filename heuristics), and across
+    function objects the first (sorted) provider of a set name wins
+    deterministically.
     """
     post = case_dir / "postProcessing"
     if not post.is_dir():
         raise FileNotFoundError(f"{case_dir}: no postProcessing/ directory")
 
-    stations: Dict[float, Path] = {}
+    # station -> {set name -> file}; the set name (stem up to and including
+    # the optional zone suffix) separates inner/outer lines of one station
+    # while still collapsing format/provider duplicates of the SAME line.
+    stations: Dict[float, Dict[str, Path]] = {}
     for fo_dir in sorted(p for p in post.iterdir() if p.is_dir()):
         time_dir = _latest_time_dir(fo_dir)
         if time_dir is None:
@@ -427,6 +451,9 @@ def discover_station_files(case_dir: Path) -> Dict[float, Path]:
         # csv listed before xy so the dict-setdefault below prefers csv.
         candidates = sorted(time_dir.glob("*.csv")) + sorted(time_dir.glob("*.xy"))
         for f in candidates:
+            m = STATION_RE.search(f.stem)
+            if not m:
+                continue
             x_over_c = parse_station_token(f.stem)
             if x_over_c is None:
                 continue
@@ -435,21 +462,36 @@ def discover_station_files(case_dir: Path) -> Dict[float, Path]:
             # non-velocity samples (e.g. bl_x007_p.xy) for both formats.
             if f.suffix.lower() == ".xy" and not _HAS_U_RE.search(f.stem):
                 continue
-            stations.setdefault(round(x_over_c, 6), f)
-    return stations
+            set_name = f.stem[: m.end()].lower()
+            stations.setdefault(round(x_over_c, 6), {}).setdefault(set_name, f)
+    # Flatten to sorted file lists; sorting by set name puts the plain outer
+    # name ahead of its '_inner' sibling, which extract_case uses as the
+    # primary `source`.
+    return {x: [by_set[k] for k in sorted(by_set)]
+            for x, by_set in stations.items()}
 
 
 def extract_case(case_dir: Union[str, Path],
                  drop_tol: float = 0.02) -> List[BLStation]:
-    """Extract every BL station of one case, sorted by x/c."""
+    """Extract every BL station of one case, sorted by x/c.
+
+    Stations served by several sets (the inner/outer line pair) are MERGED
+    by concatenating the profiles; compute_bl_metrics then sorts the union
+    by wall distance and drops exact-duplicate heights, so the integration
+    sees one clean monotone profile that carries the inner line's sublayer
+    resolution AND the outer line's BL-edge reach.
+    """
     case_dir = Path(case_dir)
     stations = discover_station_files(case_dir)
     results: List[BLStation] = []
     for x_over_c in sorted(stations):
-        f = stations[x_over_c]
-        n_wall, umag = read_profile(f)
+        files = stations[x_over_c]
+        parts = [read_profile(f) for f in files]
+        n_wall = np.concatenate([p[0] for p in parts])
+        umag = np.concatenate([p[1] for p in parts])
         metrics = compute_bl_metrics(n_wall, umag, drop_tol=drop_tol)
-        results.append(BLStation(x_over_c=x_over_c, metrics=metrics, source=f))
+        results.append(BLStation(x_over_c=x_over_c, metrics=metrics,
+                                 source=files[0], sources=tuple(files)))
     return results
 
 

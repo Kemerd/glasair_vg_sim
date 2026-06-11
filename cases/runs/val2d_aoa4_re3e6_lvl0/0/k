@@ -15,19 +15,27 @@ FoamFile
 // Inlet turbulence chain (documented so a reviewer can audit the numbers):
 //   XFOIL anchor uses e^N with Ncrit = 9. Mack's relation
 //       Ncrit = -8.43 - 2.4 ln(Tu)        (Tu as a fraction)
-//   inverts to Tu = exp(-(8.43 + Ncrit)/2.4) ~ 0.0007 = 0.07014 %,
-//   so the RANS transition model sees the same disturbance environment as
-//   the e^N comparison. Then k_inf = 1.5 (Tu * U)^2 = 0.00141687 m^2/s^2.
-// Freestream decay caveat: between the boundary (25 c out) and the leading
-// edge, k decays at a rate set by omega; the companion omega file picks the
-// LOW end of that decay (eddy-viscosity ratio 10, the top of the
-// Langtry-Menter recommended 1..10 band) precisely to keep the LE-incident
-// Tu close to the Mack value. Residual decay (~tens of percent on Tu) is
-// accepted and identical across the polar -- the study reads deltas.
+//   inverts to Tu = exp(-(8.43 + Ncrit)/2.4) ~ 0.0007 = 0.07014 %.
+//   That Tu is the LE-INCIDENT target: the RANS transition model must see
+//   the e^N disturbance environment AT THE AIRFOIL, not at the boundary.
+//     k_LE (target)  = 1.5 (Tu * U)^2 = 0.00141687 m^2/s^2
+// Freestream decay compensation: between the boundary (25 c out) and the
+// leading edge, k decays analytically at the rate beta* k omega (uniform
+// freestream U turns the k equation into dk/dx = -beta* k omega / U), so
+//     k(LE) = k(boundary) * exp(-beta* omega_LE 25c / U)
+//           = k(boundary) * 0.607718
+// with beta* = 0.09 and omega_LE = 9.6999 (target-state omega at the
+// nut/nu = 10 ratio documented in 0/omega -- the top of the Langtry-Menter
+// 1..10 band, i.e. the slowest-decay end). The boundary value below is
+// therefore PRE-BOOSTED by the inverse factor,
+//     k_inf = k_LE / 0.607718 = 0.00233145 m^2/s^2,
+// so the decayed LE-incident Tu lands on the Mack/Ncrit-9 value exactly
+// (within the constant-omega analytic model; builder: inlet_turbulence in
+// scripts/build_validation_case.py).
 
 dimensions      [0 2 -2 0 0 0 0];
 
-internalField   uniform 0.00141687;
+internalField   uniform 0.00233145;
 
 boundaryField
 {
@@ -46,8 +54,8 @@ boundaryField
         // Freestream level where flow enters, zeroGradient where it leaves
         // (inletOutlet), matching the freestream U/p pairing on this patch.
         type            inletOutlet;
-        inletValue      uniform 0.00141687;
-        value           uniform 0.00141687;
+        inletValue      uniform 0.00233145;
+        value           uniform 0.00233145;
     }
 
     outlet
@@ -55,8 +63,8 @@ boundaryField
         // Wake leaves through here; backflow guard returns the freestream
         // level rather than amplifying whatever was advected out.
         type            inletOutlet;
-        inletValue      uniform 0.00141687;
-        value           uniform 0.00141687;
+        inletValue      uniform 0.00233145;
+        value           uniform 0.00233145;
     }
 
     frontAndBack

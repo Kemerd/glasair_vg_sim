@@ -13,10 +13,12 @@ FoamFile
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 // Steady SIMPLE solve. Post-stall AoA points that refuse to converge fall
-// back to pimpleFoam pseudo-transient (local Euler time stepping); the exact
-// dictionary deltas for that switch are documented in this case's README.md
-// so the fallback is a recorded, reproducible change -- never a hand edit
-// that drifts from the template (spec section 4 reproducibility rule).
+// back to pimpleFoam pseudo-transient (local Euler time stepping); the
+// fallback is MECHANICAL, never a hand edit: the ready-made variant
+// dictionaries live in this case's pimple_overrides/ directory and the M1
+// driver (scripts/run_validation.py) copies them into system/ on its
+// automatic post-stall retry. The deltas are documented in this case's
+// README.md (spec section 4 reproducibility rule).
 
 application     simpleFoam;
 
@@ -66,6 +68,11 @@ functions
     // Wall-normal boundary-layer profile lines on the suction surface
     // (Phase-1 item 5: the delta/delta* table that sizes the VGs).
     #include "sampling"
+
+    // Wall shear stress on the airfoil patch + raw surface dump (onEnd):
+    // the data producer for the transition gate's Cf(x/c) curve, converted
+    // to postProcessing/cf_upper.csv by scripts/extract_cf.py.
+    #include "wallShearStressObj"
 }
 
 // ************************************************************************* //

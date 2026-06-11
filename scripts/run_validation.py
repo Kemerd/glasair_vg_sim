@@ -19,10 +19,19 @@ runnable TODAY, before the WSL2 + OpenFOAM v2506 install is repaired):
                          with every tool's output captured to log.<tool> in
                          the case directory. Convergence is judged by
                          scripts/parse_forces.py (residuals + force-flatness
-                         per spec section 4); converged cases then get the
-                         boundary-layer extraction (scripts/extract_bl.py) and
-                         the upper-surface transition pickup. If NO solver is
-                         reachable the driver stops after case generation
+                         per spec section 4); cases that pass then face the
+                         spec wall-y+ gate (parse_forces.gate_case_yplus:
+                         per-case histogram printed, case FAILED when y+ > 2
+                         on more than 1% of airfoil wall faces); surviving
+                         cases get the
+                         boundary-layer extraction (scripts/extract_bl.py),
+                         the wall-Cf conversion (scripts/extract_cf.py) and
+                         the upper-surface transition pickup. Post-stall
+                         cases (alpha >= --pimple-alpha, default 14 deg)
+                         that fail to converge steady are retried ONCE with
+                         the pimpleFoam pseudo-transient variant from the
+                         template's pimple_overrides/ directory. If NO solver
+                         is reachable the driver stops after case generation
                          with a 'SOLVER MISSING - generated N cases ready'
                          summary and exit code 0 (the current state until the
                          WSL repair lands).
@@ -47,18 +56,24 @@ Sibling-script contracts (defined here so the pieces stay decoupled):
       .passed/.cl_mean/.cd_mean/.cm_mean. CLI fallback: exit 0 = PASS,
       1 = FAIL, 2 = load error, with 'mean Cl : ...' lines on stdout.
       Unparseable output marks the case NOT converged - never silently
-      included (spec section 4).
+      included (spec section 4). The same module's gate_case_yplus(case_dir)
+      -> YPlusVerdict is the spec wall-y+ gate; solve_case calls it on every
+      case that passed convergence, prints .report() (the spec-required
+      per-case y+ histogram) and treats .passed == False as a case FAIL.
   scripts/extract_bl.py CASE_DIR
       wall-normal BL profile sampling -> results/bl_table_{case}.csv (the
       delta/delta* table of spec Phase-1 item 5), run on converged cases.
-  transition Cf curve
-      the case template's own wall-Cf sampling function object writes a
-      cf*.csv (columns x_c, cf; 'upper'/'top' in the name for the suction
-      surface) under CASE_DIR/postProcessing/; this driver feeds it to the
-      shared transition detector in validation/compare_gate.py.
+  scripts/extract_cf.py CASE_DIR
+      the transition-gate data producer: converts the raw wall-shear surface
+      dump written by the case template's wallShearStress function object
+      (postProcessing/wallCf/<time>/) into the suction-surface skin-friction
+      curve CASE_DIR/postProcessing/cf_upper.csv (columns x_c, cf); this
+      driver runs it on converged cases and feeds the curve to the shared
+      transition detector in validation/compare_gate.py.
 
 Run:  python scripts/run_validation.py [--re 3e6] [--level 0] [--jobs 2]
-          [--cores 8] [--alphas ...] [--no-solve] [--force] [--skip-xfoil]
+          [--cores 8] [--alphas ...] [--pimple-alpha 14] [--no-solve]
+          [--force] [--skip-xfoil]
 
 ASCII-only console output; all file IO UTF-8.
 """
@@ -94,6 +109,7 @@ from geometry.units import load_aircraft  # noqa: E402
 from validation.compare_gate import (  # noqa: E402
     detect_transition_from_cf,
     main as compare_gate_main,
+    read_case_application,
     read_csv_columns,
     find_xfoil_polar,
     re_tag,
@@ -111,6 +127,21 @@ XFOIL_SCRIPT = REPO / "validation" / "xfoil_polar.py"
 BUILD_SCRIPT = REPO / "scripts" / "build_validation_case.py"
 PARSE_FORCES = REPO / "scripts" / "parse_forces.py"
 EXTRACT_BL = REPO / "scripts" / "extract_bl.py"
+EXTRACT_CF = REPO / "scripts" / "extract_cf.py"
+
+# pimpleFoam pseudo-transient fallback variant (post-stall retries): the
+# template ships the full replacement dictionaries; the builder copies them
+# into every instantiated case, and apply_pimple_variant() below swaps them
+# into system/ when the steady solve refuses to converge.
+PIMPLE_OVERRIDES = (REPO / "cases" / "validation_2d" / "template"
+                    / "pimple_overrides")
+PIMPLE_VARIANT_FILES = ("controlDict", "fvSchemes", "fvSolution")
+
+# Default AoA threshold for the automatic pimpleFoam retry: the LS(1)-0413
+# clean-section stall lands in the mid-teens, so 14 deg marks "post-stall
+# enough that a steady non-convergence is physics, not a setup bug".
+# Overridable per run via --pimple-alpha.
+PIMPLE_ALPHA_DEFAULT = 14.0
 
 # ESI OpenFOAM v2506 environment file inside the WSL2 Ubuntu guest - the
 # exact package this project pins (README bootstrap section). Sourced before
@@ -279,10 +310,14 @@ def ensure_xfoil_polars(re_value: float, ncrit: int, skip: bool) -> bool:
     # accepts a list; no-args would sweep the full 1.5/3/6 M spec grid).
     # Targeted generation keeps the driver responsive; the other Re points
     # are produced on their own runs or by calling xfoil_polar.py directly.
-    print(f"  [xfoil] generating Re {re_value:g} polar via "
+    # --ncrit is forwarded so the generated file carries the SAME e^N
+    # setting (and N filename token) the gate will look for - otherwise a
+    # non-default --ncrit run would generate a polar it can never match.
+    print(f"  [xfoil] generating Re {re_value:g} polar (Ncrit {ncrit}) via "
           f"{XFOIL_SCRIPT.name} ...")
     proc = subprocess.run(
-        [sys.executable, str(XFOIL_SCRIPT), "--re", f"{re_value:g}"],
+        [sys.executable, str(XFOIL_SCRIPT), "--re", f"{re_value:g}",
+         "--ncrit", str(ncrit)],
         capture_output=True, text=True, cwd=str(REPO))
     if proc.returncode != 0:
         tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-10:])
@@ -479,16 +514,35 @@ def parse_forces_means(case_dir: Path) -> Optional[dict]:
     return None
 
 
-def extract_transition(case_dir: Path) -> Optional[float]:
-    """Run extract_bl on a converged case and pick up the transition x/c.
+def case_yplus_verdict(case_dir: Path):
+    """Spec section-4 wall-y+ gate for one case via scripts/parse_forces.
 
-    Two distinct artifacts meet here: extract_bl produces the delta/delta*
+    Thin indirection mirroring parse_forces_means: the in-process import is
+    the preferred path (the CONTRACT comment above gate_case_yplus in
+    scripts/parse_forces.py names THIS caller), and module-level dispatch
+    keeps the hook monkeypatch-friendly for the solve_case tests. Returns
+    the YPlusVerdict, or None when the y+ machinery is missing (an old or
+    replaced parse_forces) - the caller then flags the case rather than
+    silently skipping a spec gate.
+    """
+    try:
+        from scripts.parse_forces import gate_case_yplus
+    except ImportError:
+        return None
+    return gate_case_yplus(Path(case_dir))
+
+
+def extract_transition(case_dir: Path) -> Optional[float]:
+    """Post-process one converged case and pick up the transition x/c.
+
+    Three distinct artifacts meet here: extract_bl produces the delta/delta*
     BL table (spec Phase-1 item 5, results/bl_table_*.csv) from the case's
-    wall-normal sample sets, while the TRANSITION pickup reads the
-    upper-surface wall-Cf curve (columns x_c, cf) that the case template's
-    own sampling function object writes under postProcessing/ - the glob
-    below prefers files whose name marks the upper/top surface. The
-    transition definition itself lives in
+    wall-normal sample sets; extract_cf is the transition-gate DATA PRODUCER
+    - it converts the wallShearStress function-object surface dump
+    (postProcessing/wallCf/<time>/) into the suction-surface Cf curve
+    postProcessing/cf_upper.csv (columns x_c, cf); and the TRANSITION pickup
+    then reads that curve - the glob below prefers files whose name marks
+    the upper/top surface. The transition definition itself lives in
     validation/compare_gate.detect_transition_from_cf (single shared
     implementation, documented there).
     """
@@ -498,7 +552,28 @@ def extract_transition(case_dir: Path) -> Optional[float]:
             capture_output=True, text=True, cwd=str(REPO))
         if proc.returncode != 0:
             print(f"    [bl] extract_bl exited {proc.returncode} "
+                  f"(BL table unavailable for this case)")
+
+    # Cf production: preferred path is the in-process call (same pattern as
+    # parse_forces above); the CLI fallback covers a replaced module. A
+    # failure here only loses gate (c) for this case - reported, not fatal.
+    try:
+        from scripts.extract_cf import extract_case as _extract_cf_case
+    except ImportError:
+        _extract_cf_case = None
+    if _extract_cf_case is not None:
+        try:
+            _extract_cf_case(Path(case_dir))
+        except (FileNotFoundError, ValueError, RuntimeError) as exc:
+            print(f"    [cf] {exc}")
+    elif EXTRACT_CF.is_file():
+        proc = subprocess.run(
+            [sys.executable, str(EXTRACT_CF), str(case_dir)],
+            capture_output=True, text=True, cwd=str(REPO))
+        if proc.returncode != 0:
+            print(f"    [cf] extract_cf exited {proc.returncode} "
                   f"(transition unavailable for this case)")
+
     # Cf-curve discovery: explicit upper/top names first, then any cf*.csv.
     post = case_dir / "postProcessing"
     candidates: List[Path] = []
@@ -518,14 +593,93 @@ def extract_transition(case_dir: Path) -> Optional[float]:
     return detect_transition_from_cf(table["x_c"], table["cf"])
 
 
+def apply_pimple_variant(case_dir: Path) -> Path:
+    """Swap a case's system/ dictionaries to the pimpleFoam variant.
+
+    The post-instantiation hook of the documented post-stall fallback: the
+    full replacement dictionaries (controlDict / fvSchemes / fvSolution,
+    deltas commented inside each file) ship in the template's
+    pimple_overrides/ directory, which the case builder copies into every
+    instantiated case. The case-local copy is preferred; cases built before
+    the variant existed fall back to the repo template so the retry never
+    depends on a rebuild. Returns the directory the variant came from.
+    Reverting is a rebuild (build_validation_case.py --force) - dictionaries
+    are never hand-restored, per the reproducibility rule.
+    """
+    case_dir = Path(case_dir)
+    src_dir = case_dir / "pimple_overrides"
+    if not src_dir.is_dir():
+        src_dir = PIMPLE_OVERRIDES
+    if not src_dir.is_dir():
+        raise FileNotFoundError(
+            f"pimple variant dictionaries not found (neither "
+            f"{case_dir / 'pimple_overrides'} nor {PIMPLE_OVERRIDES})")
+    sys_dir = case_dir / "system"
+    sys_dir.mkdir(parents=True, exist_ok=True)
+    for name in PIMPLE_VARIANT_FILES:
+        src = src_dir / name
+        if not src.is_file():
+            raise FileNotFoundError(f"{src_dir}: variant file {name} missing")
+        shutil.copyfile(src, sys_dir / name)
+    return src_dir
+
+
+def run_solver_chain(mode: str, case_dir: Path, n_cores: int, app: str,
+                     with_mesh: bool) -> Optional[str]:
+    """Mesh (optionally) + decompose + solve + reconstruct for one case.
+
+    Returns the name of the first failed step, or None on success. The
+    pimpleFoam retry reuses the already-validated mesh, so ``with_mesh``
+    is False there and the chain restarts at decomposePar.
+    """
+    chain: List[Tuple[str, str]] = []
+    if with_mesh:
+        chain += [("blockMesh", "blockMesh"), ("checkMesh", "checkMesh")]
+    chain += [
+        ("decomposePar", "decomposePar -force"),
+        (app, f"mpirun -np {n_cores} {app} -parallel"),
+        ("reconstructPar", "reconstructPar -latestTime"),
+    ]
+    for log_name, command in chain:
+        rc = run_case_command(mode, case_dir, command, log_name)
+        if rc != 0:
+            return log_name
+        if log_name == "checkMesh":
+            # checkMesh exits 0 even when checks FAIL (its status only says
+            # it ran), so the real gate is the log content - same rule as
+            # the case's own Allrun: a failing mesh must never reach the
+            # solver (spec section 4 mesh rules).
+            log_path = case_dir / "log.checkMesh"
+            if log_path.is_file() and _regex.search(
+                    r"Failed [0-9]+ mesh checks",
+                    log_path.read_text(encoding="utf-8", errors="replace")):
+                return log_name
+    return None
+
+
 def solve_case(mode: str, alpha: float, case_dir: Path, cores: int,
-               force: bool) -> dict:
-    """Full per-case chain: mesh, decompose, solve, gate, BL extraction.
+               force: bool, pimple_alpha: float = PIMPLE_ALPHA_DEFAULT
+               ) -> dict:
+    """Full per-case chain: mesh, decompose, solve, gates, post-processing.
+
+    Gates, in order: the parse_forces convergence gate (residuals + force
+    flatness), then - on converged solutions only, after any pimple retry -
+    the spec section-4 wall-y+ gate (gate_case_yplus; histogram printed,
+    y+ FAIL/INDETERMINATE flags the case and excludes it from the polar).
 
     Returns the status payload that also lands in m1_status.json. Designed
     to run inside a worker thread - all heavy lifting is in subprocesses, so
     'jobs'-wide threading is the right concurrency model here (the GIL only
     sees waiting).
+
+    Post-stall fallback (spec Phase-1 item 3): when the steady simpleFoam
+    attempt of a case at alpha >= ``pimple_alpha`` fails to converge -
+    either the solver dies (post-stall divergence) or the parse_forces gate
+    rejects it - the case is retried ONCE with the pimpleFoam localEuler
+    pseudo-transient variant (apply_pimple_variant above). Mesh failures
+    never trigger the retry: a broken mesh is a setup bug, not stall
+    physics. The status records application + pseudo_transient so the gate
+    report can flag these points.
     """
     # Idempotency: a recorded convergence PASS short-circuits the whole
     # chain unless the operator forces a re-solve.
@@ -537,35 +691,101 @@ def solve_case(mode: str, alpha: float, case_dir: Path, cores: int,
     status: dict = {"alpha": alpha, "case": str(case_dir),
                     "converged": False, "skipped": False}
     n_cores = decompose_cores(case_dir, cores)
+    # The case's own controlDict names the solver (a case already switched
+    # to the pimple variant - e.g. by a previous retry - stays switched).
+    app = read_case_application(case_dir) or "simpleFoam"
+    status["application"] = app
 
-    # The meshing/solve chain, in dependency order. checkMesh runs in fail-
-    # fast position: a broken mesh must never reach the solver (spec section
-    # 4 mesh rules; the y+ histogram check itself is part of parse_forces /
-    # case function objects).
-    chain = [
-        ("blockMesh", "blockMesh"),
-        ("checkMesh", "checkMesh"),
-        ("decomposePar", "decomposePar -force"),
-        ("simpleFoam", f"mpirun -np {n_cores} simpleFoam -parallel"),
-        ("reconstructPar", "reconstructPar -latestTime"),
-    ]
-    for log_name, command in chain:
-        rc = run_case_command(mode, case_dir, command, log_name)
-        if rc != 0:
-            status["failed_step"] = log_name
-            status["log"] = str(case_dir / f"log.{log_name}")
-            write_status(case_dir, status)
-            return status
+    # ---- steady attempt (mesh + solve + gate) -------------------------------
+    failed = run_solver_chain(mode, case_dir, n_cores, app, with_mesh=True)
+    solver_failed = failed is not None and failed == app
+    if failed is not None and not solver_failed:
+        # Mesh/decompose/reconstruct failure: setup problem, never retried.
+        status["failed_step"] = failed
+        status["log"] = str(case_dir / f"log.{failed}")
+        write_status(case_dir, status)
+        return status
+    if not solver_failed:
+        # Convergence gate: parse_forces owns the residual + force-flatness
+        # criteria; anything unparseable stays NOT converged (auto-flagged).
+        means = parse_forces_means(case_dir)
+        if means is not None:
+            status.update({k: means[k] for k in ("cl", "cd", "cm")
+                           if k in means})
+            status["converged"] = bool(means.get("converged", False))
 
-    # Convergence gate: parse_forces owns the residual + force-flatness
-    # criteria; anything unparseable stays NOT converged (auto-flagged).
-    means = parse_forces_means(case_dir)
-    if means is not None:
-        status.update({k: means[k] for k in ("cl", "cd", "cm") if k in means})
-        status["converged"] = bool(means.get("converged", False))
+    # ---- post-stall pimpleFoam pseudo-transient retry ------------------------
+    #  One retry, only for post-stall alphas still configured steady; the
+    #  variant swap is mechanical (full dictionaries from pimple_overrides/),
+    #  never a hand edit, so the rerun stays reproducible.
+    if (not status["converged"] and app == "simpleFoam"
+            and alpha >= pimple_alpha):
+        print(f"    [pimple] alpha {alpha:+.1f} deg did not converge steady "
+              f"- retrying with the pimpleFoam localEuler variant")
+        try:
+            apply_pimple_variant(case_dir)
+        except FileNotFoundError as exc:
+            print(f"    [pimple] variant unavailable: {exc}")
+        else:
+            app = "pimpleFoam"
+            status["application"] = app
+            status["pseudo_transient"] = True
+            status.pop("failed_step", None)
+            status.pop("log", None)
+            failed = run_solver_chain(mode, case_dir, n_cores, app,
+                                      with_mesh=False)
+            if failed is None:
+                # Re-gate on the same force-flatness criterion; residual
+                # levels under local time stepping are recorded by the case
+                # but are not comparable to the steady thresholds.
+                means = parse_forces_means(case_dir)
+                if means is not None:
+                    status.update({k: means[k] for k in ("cl", "cd", "cm")
+                                   if k in means})
+                    status["converged"] = bool(means.get("converged", False))
 
-    # BL extraction + transition pickup only on converged solutions - a
-    # non-converged Cf field would feed garbage into gate (c).
+    # Record whichever step is still failing after any retry (a retry that
+    # converged cleared ``failed``); absence of failed_step with converged
+    # False means the chain ran but the convergence gate said no.
+    if failed is not None:
+        status["failed_step"] = failed
+        status["log"] = str(case_dir / f"log.{failed}")
+
+    # ---- spec section-4 wall-y+ gate (parse_forces gate_case_yplus) ----------
+    #  Runs only on solutions that already passed the convergence gate, and
+    #  deliberately AFTER the pimple retry: a bad y+ distribution is a MESH
+    #  property, so re-solving with another time scheme can neither fix it
+    #  nor should be triggered by it. The spec requires the per-case y+
+    #  histogram to be printed and the case to FAIL when y+ > 2 on more than
+    #  1% of wall faces; an INDETERMINATE verdict (no usable y+ evidence)
+    #  also fails - auto-flagged, never silently included.
+    if status["converged"]:
+        yp = case_yplus_verdict(case_dir)
+        if yp is None:
+            # parse_forces without the y+ entry point: the gate cannot run,
+            # and a spec gate that cannot run must flag, not wave through.
+            print(f"    [yplus] gate unavailable (parse_forces lacks "
+                  f"gate_case_yplus) - case flagged")
+            status["converged"] = False
+            status["failed_step"] = "yplus"
+        else:
+            # The spec-required histogram, indented to the driver log style.
+            for line in yp.report().splitlines():
+                print(f"    {line}")
+            # Marker fields for the audit trail (NaN stats are omitted so
+            # the JSON stays strictly portable).
+            status["yplus_status"] = yp.status
+            status["yplus_passed"] = bool(yp.passed)
+            if math.isfinite(yp.y_max):
+                status["yplus_max"] = float(yp.y_max)
+            if math.isfinite(yp.fraction_above):
+                status["yplus_fraction_above"] = float(yp.fraction_above)
+            if not yp.passed:
+                status["converged"] = False
+                status["failed_step"] = "yplus"
+
+    # BL extraction + Cf conversion + transition pickup only on converged
+    # solutions - a non-converged Cf field would feed garbage into gate (c).
     if status["converged"]:
         xtr = extract_transition(case_dir)
         if xtr is not None:
@@ -575,7 +795,8 @@ def solve_case(mode: str, alpha: float, case_dir: Path, cores: int,
 
 
 def solve_all(mode: str, cases: List[Tuple[float, Path]], jobs: int,
-              cores: int, force: bool) -> List[dict]:
+              cores: int, force: bool,
+              pimple_alpha: float = PIMPLE_ALPHA_DEFAULT) -> List[dict]:
     """Run the per-case chain across the sweep, ``jobs`` cases in flight.
 
     Two-wide by default: 2 cases x 8 cores leaves headroom on the 24C/32T
@@ -584,16 +805,21 @@ def solve_all(mode: str, cases: List[Tuple[float, Path]], jobs: int,
     """
     results: List[dict] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
-        futures = {ex.submit(solve_case, mode, a, d, cores, force): (a, d)
+        futures = {ex.submit(solve_case, mode, a, d, cores, force,
+                             pimple_alpha): (a, d)
                    for a, d in cases}
         for fut in concurrent.futures.as_completed(futures):
             alpha, case_dir = futures[fut]
             status = fut.result()
             results.append(status)
-            # Live one-line progress per finished case (ASCII only).
+            # Live one-line progress per finished case (ASCII only); points
+            # solved by the fallback are tagged so the console mirrors the
+            # gate report's pseudo-transient annotation.
             verdict = ("SKIP (already converged)" if status.get("skipped")
                        else "CONVERGED" if status.get("converged")
                        else f"FAILED ({status.get('failed_step', 'gate')})")
+            if status.get("pseudo_transient") and not status.get("skipped"):
+                verdict += " [pimpleFoam pseudo-transient]"
             print(f"  [solve] alpha {alpha:+05.1f} deg -> {verdict}")
     results.sort(key=lambda s: s.get("alpha", 0.0))
     return results
@@ -676,6 +902,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--alphas", type=str, default=None,
                         help="comma-separated AoA override in degrees "
                              "(default: the Phase-1 schedule)")
+    parser.add_argument("--pimple-alpha", type=float,
+                        default=PIMPLE_ALPHA_DEFAULT,
+                        help="AoA threshold (deg) above which a non-"
+                             "converged steady case is retried once with "
+                             "the pimpleFoam pseudo-transient variant "
+                             f"(default {PIMPLE_ALPHA_DEFAULT:g}; set very "
+                             "high, e.g. 999, to disable the retry)")
     parser.add_argument("--no-solve", action="store_true",
                         help="stop after case generation even if a solver "
                              "is available (dry-run)")
@@ -734,8 +967,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("  solver available but no cases to run (see build step above)")
     else:
         print(f"  solver mode: {mode}; running {args.jobs} case(s) wide, "
-              f"{args.cores} core(s) each (decomposeParDict wins)")
-        solved = solve_all(mode, cases, args.jobs, args.cores, args.force)
+              f"{args.cores} core(s) each (decomposeParDict wins); "
+              f"pimple retry at alpha >= {args.pimple_alpha:g} deg")
+        solved = solve_all(mode, cases, args.jobs, args.cores, args.force,
+                           args.pimple_alpha)
         n_conv = sum(1 for s in solved if s.get("converged"))
         n_skip = sum(1 for s in solved if s.get("skipped"))
         print(f"  [solve] {n_conv}/{len(solved)} converged "

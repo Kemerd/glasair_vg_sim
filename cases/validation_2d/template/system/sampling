@@ -6,13 +6,22 @@
 
 // Wall-normal profile lines on the SUCTION surface at the Phase-1 stations
 // x/c = 0.05 0.07 0.10 0.15 0.20 0.30 0.40 0.50 0.60 0.70 0.80 0.90.
-// Each line starts a hair off the wall (so the first sample lands inside
-// the first cell, not on the boundary face) and runs 0.15 c along the LOCAL
-// surface normal -- comfortably past delta even at high AoA. The builder
-// computes the anchor points and normals from the same resampled LS(1)-0413
-// loop the mesh was built from, so the lines track the actual surface.
-// Downstream, the BL-extraction utility integrates these profiles into the
-// delta / delta* table that sizes the VGs (spec Phase-1 item 5).
+// TWO lines per station, both starting a hair off the wall (so the first
+// sample lands inside the first cell, not on the boundary face), along the
+// LOCAL surface normal:
+//   bl_x###_inner -- dense sublayer line, ~2x the d99 estimate long at
+//                    ~1e-5 m pitch. The outer line alone puts ~2.5e-4 m
+//                    between samples while the y+ = 1 first cell is ~8e-6 m,
+//                    so the entire resolved sublayer would fall between its
+//                    first two points.
+//   bl_x###       -- outer line, 0.15 c / 600 points, comfortably past
+//                    delta even at high AoA; captures the BL edge and the
+//                    outer flow the edge-detection guard needs.
+// The builder computes anchors and normals from the same resampled
+// LS(1)-0413 loop the mesh was built from, so the lines track the actual
+// surface. Downstream, scripts/extract_bl.py MERGES each inner/outer pair
+// (sorted by wall distance, deduplicated) and integrates the result into
+// the delta / delta* table that sizes the VGs (spec Phase-1 item 5).
 
 blProfiles
 {

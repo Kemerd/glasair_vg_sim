@@ -4,12 +4,16 @@
 |  scripts/build_validation_case.py                                           |
 \*---------------------------------------------------------------------------*/
 
-// Writes the y+ FIELD at every write time plus min/max/average per patch in
-// the log. Spec section 4: y+ < 1 everywhere is the design target (the mesh
-// generator sizes the first cell from the flat-plate correlation chain in
-// scripts/first_cell_height.py), and the case FAILS if max y+ > 2 over more
-// than 1% of wall faces -- the post-processing gate computes that histogram
-// from the field this object writes.
+// Mechanism: writes the y+ FIELD into each write-time directory (the per-
+// face evidence) plus min/max/average per patch to the solver log and to
+// postProcessing/yPlus1/<time>/yPlus.dat. scripts/parse_forces.py
+// yplus_verdict() evaluates spec section 4 from those outputs: it prints
+// the per-case y+ histogram from the written field and FAILS the case when
+// y+ > 2 on more than 1% of the airfoil wall faces (falling back to the
+// conservative max-y+ <= 2 rule when only the log stats survive). The
+// design target itself is y+ < 1 everywhere -- the mesh generator sizes the
+// first cell from the flat-plate correlation chain in
+// scripts/first_cell_height.py.
 
 yPlus1
 {

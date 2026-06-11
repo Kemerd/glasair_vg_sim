@@ -16,8 +16,14 @@ FoamFile
 // the TOP of the Langtry-Menter recommended 1..10 inlet band. The high ratio
 // is chosen deliberately: freestream k decays as dk/dt = -beta* k omega, so
 // the SMALLEST admissible omega gives the SLOWEST Tu decay over the 25 c of
-// travel between the far boundary and the airfoil, keeping the LE-incident
-// Tu near the Mack/Ncrit value documented in 0/k. omega_inf = @OMEGA_INF@.
+// travel between the far boundary and the airfoil. The residual decay is
+// then PRE-COMPENSATED (see 0/k): the boundary k is boosted by the inverse
+// analytic decay factor 1/@DECAY_FACTOR@ so the LE-incident Tu equals the
+// Mack/Ncrit-9 value, and this omega is recomputed from the boosted k to
+// hold nut/nu = 10 at the boundary:
+//     omega_inf = @OMEGA_INF@   (boundary value below)
+//     omega_LE  = @OMEGA_LE@    (target-state omega; sets the decay rate
+//                                in the compensation exponent)
 
 dimensions      [0 0 -1 0 0 0 0];
 

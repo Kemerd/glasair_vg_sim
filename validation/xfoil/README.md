@@ -13,6 +13,9 @@ rerun the driver to refresh. Binary provenance: `tools/xfoil/SOURCE.md`.
 * Free transition: e^N with Ncrit = 9. Tripped: forced
   xtr = 0.05/0.05 (top/bottom).
 * AoA schedule: -4 to 20 deg (19 points; 2-deg steps to 8, 1-deg steps to 20 per spec).
+* File naming: polar_Re<tag>_N9_<free|trip>.csv - the N token
+  records the e^N setting so the gate evaluator matches Ncrit by
+  filename; legacy names without the token remain discoverable.
 
 ## Speed / Reynolds convention (all 2D cases this milestone)
 
@@ -40,12 +43,12 @@ simpleFoam airfoil-study practice.
 
 | polar | converged | Clmax | alpha_stall (deg) | cd_min | skipped alphas |
 |-------|-----------|-------|-------------------|--------|----------------|
-| polar_Re1.5M_free.csv | 18/19 | 1.790 | 18.0 | 0.00474 | 13 |
-| polar_Re1.5M_trip.csv | 19/19 | 1.790 | 18.0 | 0.01032 | - |
-| polar_Re3M_free.csv | 17/19 | 1.915 | 19.0 | 0.00420 | 9, 10 |
-| polar_Re3M_trip.csv | 19/19 | 1.915 | 19.0 | 0.00909 | - |
-| polar_Re6M_free.csv | 19/19 | 1.965 | 18.0 | 0.00465 | - |
-| polar_Re6M_trip.csv | 17/19 | 1.965 | 18.0 | 0.00806 | 14 (froze), 19 |
+| polar_Re1.5M_N9_free.csv | 18/19 | 1.790 | 18.0 | 0.00474 | 13 |
+| polar_Re1.5M_N9_trip.csv | 19/19 | 1.790 | 18.0 | 0.01032 | - |
+| polar_Re3M_N9_free.csv | 17/19 | 1.915 | 19.0 | 0.00420 | 9, 10 |
+| polar_Re3M_N9_trip.csv | 19/19 | 1.915 | 19.0 | 0.00909 | - |
+| polar_Re6M_N9_free.csv | 19/19 | 1.965 | 18.0 | 0.00465 | - |
+| polar_Re6M_N9_trip.csv | 17/19 | 1.965 | 18.0 | 0.00806 | 14 (froze), 19 |
 
 Skipped alphas are points XFOIL could not converge within 200 iterations (PACC stores converged points only); they
 are omitted from the CSVs rather than silently included. Points

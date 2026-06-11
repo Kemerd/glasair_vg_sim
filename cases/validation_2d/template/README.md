@@ -19,10 +19,10 @@ python scripts/build_validation_case.py --aoa @AOA_DEG@ --re @RE@ --level @LEVEL
 | U | @U_MAG@ m/s | U = Re * nu / c |
 | nu | @NU@ m^2/s | aircraft.yaml atmosphere (ISA sea level) |
 | Mach | @MACH@ | see the compressibility note below |
-| Tu (inlet) | @TU_PERCENT@ % | Mack: Ncrit = -8.43 - 2.4 ln(Tu), Ncrit = 9 |
-| k_inf | @K_INF@ m^2/s^2 | 1.5 (Tu U)^2 |
-| omega_inf | @OMEGA_INF@ 1/s | nut/nu = 10 (slowest admissible Tu decay) |
-| ReThetat_inf | @RETHETAT_INF@ | Langtry-Menter ZPG correlation at that Tu |
+| Tu (LE target) | @TU_PERCENT@ % | Mack: Ncrit = -8.43 - 2.4 ln(Tu), Ncrit = 9 |
+| k_inf | @K_INF@ m^2/s^2 | 1.5 (Tu U)^2 / @DECAY_FACTOR@ -- boundary value pre-boosted for the analytic freestream decay over the 25c approach, so the LE-incident Tu is the Mack value (audit trail in 0/k) |
+| omega_inf | @OMEGA_INF@ 1/s | nut/nu = 10 on the boosted k (slowest admissible Tu decay) |
+| ReThetat_inf | @RETHETAT_INF@ | Langtry-Menter ZPG correlation at the LE-target Tu |
 
 ### Speed/Re convention and the Re = 6M Mach note
 
@@ -95,7 +95,7 @@ Every choice is justified line-by-line in the `0/` dictionaries themselves.
 ## Running (WSL2 Ubuntu, ESI OpenFOAM v2506)
 
 ```
-./Allrun          # blockMesh -> checkMesh -> decomposePar -> simpleFoam (8 ranks) -> reconstructPar
+./Allrun          # blockMesh -> checkMesh -> decomposePar -> simpleFoam (@N_SUBDOMAINS@ ranks; level-scaled, read from decomposeParDict) -> reconstructPar
 ```
 
 `Allrun` sources `/usr/lib/openfoam/openfoam2506/etc/bashrc` if no OpenFOAM
@@ -112,40 +112,50 @@ iterations (from `postProcessing/forceCoeffs1`).
 
 High-AoA points past stall can refuse to converge steady (shedding wants to
 exist). Per spec Phase-1 item 3 the documented fallback is pimpleFoam with
-LOCAL-EULER pseudo-transient stepping. Exact dictionary deltas -- apply
-these and nothing else, then rerun:
+LOCAL-EULER pseudo-transient stepping -- and it is MECHANICAL, never a hand
+edit: this case ships the complete variant dictionaries in its
+`pimple_overrides/` directory (controlDict / fvSchemes / fvSolution, every
+delta commented inline with a `VARIANT:` marker). The M1 driver
+(`scripts/run_validation.py`, `apply_pimple_variant`) copies them over
+`system/` automatically when a case at alpha >= 14 deg (configurable via
+`--pimple-alpha`) fails the steady convergence gate, then re-runs the solve
+ONCE from `decomposePar` on the already-validated mesh. To apply the variant
+manually, the same copy is the whole procedure:
 
-1. `system/controlDict`
-   * `application simpleFoam;` -> `application pimpleFoam;`
-   * keep `deltaT 1;` -- under localEuler the global time index is just an
-     outer-iteration counter; `endTime` stays an iteration budget.
-2. `system/fvSchemes`
-   * `ddtSchemes { default steadyState; }` -> `ddtSchemes { default localEuler; }`
-3. `system/fvSolution` -- add final-iteration solver entries and a PIMPLE
-   block (relaxation factors stay as-is; pimpleFoam reads them for outer
-   correctors):
+```
+cp pimple_overrides/{controlDict,fvSchemes,fvSolution} system/ && ./Allrun
+```
 
-   ```
-   solvers
-   {
-       "(p)Final"        { $p;  relTol 0; }
-       "(U|k|omega|gammaInt|ReThetat)Final" { $U; relTol 0; }
-   }
-   PIMPLE
-   {
-       nOuterCorrectors         2;
-       nCorrectors              1;
-       nNonOrthogonalCorrectors 1;
-       // Pseudo-time ramp control for localEuler:
-       maxCo                    5;
-       rDeltaTSmoothingCoeff    0.05;
-       rDeltaTDampingCoeff      0.5;
-       maxDeltaT                1;
-   }
-   ```
+(`Allrun` reads `application` from `system/controlDict`, so no script edit
+is needed.) Reverting = rebuilding the case with
+`build_validation_case.py --force`. The deltas, for the audit trail:
+
+1. `controlDict`: `application simpleFoam;` -> `application pimpleFoam;`;
+   `deltaT 1;` kept -- under localEuler the global time index is just an
+   outer-iteration counter and `endTime` stays an iteration budget.
+2. `fvSchemes`: `ddtSchemes { default steadyState; }` ->
+   `ddtSchemes { default localEuler; }` (the single scheme change).
+3. `fvSolution`: final-iteration solver entries (`relTol 0`), unrelaxed
+   `...Final` equation factors, and a PIMPLE block (2 outer / 1 pressure /
+   1 non-orthogonal corrector; pseudo-time ramp `maxCo 5`,
+   `rDeltaTSmoothingCoeff 0.05`, `rDeltaTDampingCoeff 0.5`, `maxDeltaT 1`)
+   replacing the SIMPLE block. Relaxation factors otherwise stay as-is --
+   pimpleFoam reads them for its outer correctors.
 4. Convergence is then judged on the SAME force-flatness criterion (< 0.5%
    over the trailing window); residual levels under LTS are not comparable
    to the steady gate and are recorded but not gated.
 
-A fallback run must be flagged in the validation report as pseudo-transient
-(the gate script reads `application` from controlDict).
+A fallback run is flagged in the validation report as pseudo-transient:
+`validation/compare_gate.py` reads `application` from each case's
+controlDict and annotates those points in `validation/report.md`.
+
+## Transition-gate data producer (wall Cf)
+
+`system/wallShearStressObj` (included from controlDict's `functions`) runs
+two cooperating function objects `onEnd`: `wallShearStress1` computes the
+KINEMATIC wall shear tau_w/rho on the airfoil patch (simpleFoam/pimpleFoam
+are incompressible), and `wallCf` dumps it per face centre in raw format
+under `postProcessing/wallCf/<time>/`. `scripts/extract_cf.py` converts that
+dump into the suction-surface curve `postProcessing/cf_upper.csv` with
+Cf = |tau_w/rho| / (0.5 U_inf^2) -- rho cancels exactly -- which the gate's
+transition detector (`validation/compare_gate.py`) consumes.

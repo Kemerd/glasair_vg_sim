@@ -109,13 +109,23 @@ class TestAlphaSchedule:
 
 class TestNaming:
     def test_re_labels_for_spec_matrix(self):
-        # The spec file list is polar_Re{1.5|3|6}M_{free|trip}.csv - labels
+        # The file list is polar_Re{1.5|3|6}M_N9_{free|trip}.csv - labels
         # must collapse integral millions but keep the 1.5 fraction.
         assert [re_label(r) for r in DEFAULT_RE_LIST] == ["1.5M", "3M", "6M"]
 
-    def test_csv_names(self):
-        assert csv_name(1.5e6, "free") == "polar_Re1.5M_free.csv"
-        assert csv_name(6.0e6, "trip") == "polar_Re6M_trip.csv"
+    def test_csv_names_carry_ncrit_token(self):
+        # Naming contract polar_Re<tag>_N<ncrit>_<transition>.csv: the gate
+        # evaluator matches the requested Ncrit by filename, so the token is
+        # load-bearing - on tripped files too (uniform discovery pattern).
+        assert csv_name(1.5e6, "free", 9.0) == "polar_Re1.5M_N9_free.csv"
+        assert csv_name(6.0e6, "trip", 9.0) == "polar_Re6M_N9_trip.csv"
+
+    def test_csv_name_ncrit_formats(self):
+        # %g formatting: integral Ncrit collapses (9.0 -> N9), fractional
+        # values keep their decimals (7.5 -> N7.5), default is the spec N9.
+        assert csv_name(3.0e6, "free") == "polar_Re3M_N9_free.csv"
+        assert csv_name(3.0e6, "free", 7.5) == "polar_Re3M_N7.5_free.csv"
+        assert csv_name(3.0e6, "free", 4) == "polar_Re3M_N4_free.csv"
 
 
 # =============================================================================

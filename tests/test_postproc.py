@@ -522,6 +522,29 @@ def test_yplus_dat_table_fallback(tmp_path: Path) -> None:
     assert v.evidence is not None and v.evidence.name == "yPlus.dat"
 
 
+def test_yplus_dat_restart_segments_numeric_order(tmp_path: Path) -> None:
+    """Restart segments pick stats by NUMERIC start time, not lexical order.
+
+    Segment 500/ holds stale pre-restart stats (max 2.5 -> would go
+    INDETERMINATE); segment 1000/ holds the converged stats (max 1.5 ->
+    PASS). Lexically '500' > '1000', so a plain string sort would let the
+    stale segment shadow the newer one -- this pins the float ordering.
+    """
+    case = tmp_path / "restart_stats"
+    fo = case / "postProcessing" / "yPlus1"
+    _write(fo / "500" / "yPlus.dat",
+           "# Time patch min max average\n"
+           "600 airfoil 0.50 2.50 1.10\n")
+    _write(fo / "1000" / "yPlus.dat",
+           "# Time patch min max average\n"
+           "2000 airfoil 0.35 1.50 0.85\n")
+
+    v = pf.yplus_verdict(case)
+    assert v.passed and v.status == "PASS"
+    assert v.y_max == pytest.approx(1.50)            # newer segment wins
+    assert v.evidence is not None and v.evidence.parent.name == "1000"
+
+
 def test_yplus_no_evidence(tmp_path: Path) -> None:
     """A case with no y+ output at all: INDETERMINATE -> auto-flagged FAIL."""
     case = tmp_path / "empty_case"
