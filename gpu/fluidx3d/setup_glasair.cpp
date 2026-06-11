@@ -171,8 +171,13 @@ void main_setup() { // Glasair III VG-study tunnel (LS(1)-0413 section, factory-
 			if(lbm.get_t()%log_every==0ull) log_forces();
 		}
 	} else {                                                     // measurement run (Ahmed-body idiom): chunked stepping
+		// Passing the true total as run()'s second argument makes the on-screen
+		// gauge show OVERALL progress percent and OVERALL time remaining across
+		// chunks (Info::append keeps the running average when a total is given).
+		// An endless run must pass max_ulong -- the display then switches to
+		// "Elapsed Time"; passing 0 corrupts both gauges (the bug we had).
 		while(t_end==0ull||lbm.get_t()<t_end) {
-			lbm.run(log_every, t_end);
+			lbm.run(log_every, t_end>0ull ? t_end : max_ulong);
 			log_forces();
 		}
 	}
