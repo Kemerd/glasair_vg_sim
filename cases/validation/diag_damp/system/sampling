@@ -1,0 +1,264 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Boundary-layer sample lines -- Phase-1 clean-section 2D validation case    |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+
+// Wall-normal profile lines on the SUCTION surface at the Phase-1 stations
+// x/c = 0.05 0.07 0.10 0.15 0.20 0.30 0.40 0.50 0.60 0.70 0.80 0.90.
+// TWO lines per station, both starting a hair off the wall (so the first
+// sample lands inside the first cell, not on the boundary face), along the
+// LOCAL surface normal:
+//   bl_x###_inner -- dense sublayer line, ~2x the d99 estimate long at
+//                    ~1e-5 m pitch. The outer line alone puts ~2.5e-4 m
+//                    between samples while the y+ = 1 first cell is ~8e-6 m,
+//                    so the entire resolved sublayer would fall between its
+//                    first two points.
+//   bl_x###       -- outer line, 0.15 c / 600 points, comfortably past
+//                    delta even at high AoA; captures the BL edge and the
+//                    outer flow the edge-detection guard needs.
+// The builder computes anchors and normals from the same resampled
+// LS(1)-0413 loop the mesh was built from, so the lines track the actual
+// surface. Downstream, scripts/extract_bl.py MERGES each inner/outer pair
+// (sorted by wall distance, deduplicated) and integrates the result into
+// the delta / delta* table that sizes the VGs (spec Phase-1 item 5).
+
+blProfiles
+{
+    type            sets;
+    libs            (sampling);
+
+    // Sample once, from the CONVERGED solution: profiles from a half-
+    // converged state would poison the VG-sizing table.
+    writeControl    onEnd;
+
+    interpolationScheme cellPoint;
+
+    // raw = plain numeric columns; trivially parsed by the Phase-1
+    // BL-extraction script with numpy.loadtxt.
+    setFormat       raw;
+
+    fields          (U p k omega nut gammaInt ReThetat);
+
+    sets
+    (
+        bl_x005_inner
+        {
+            // x/c = 0.05 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.04999965497 0.0448010199 0.05);
+            end     (0.03706801527 0.07997912608 0.05);
+            nPoints 3749;
+        }
+        bl_x005
+        {
+            // x/c = 0.05 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.04999965497 0.0448010199 0.05);
+            end     (-0.001754602033 0.1855887924 0.05);
+            nPoints 600;
+        }
+        bl_x007_inner
+        {
+            // x/c = 0.07 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.06999972803 0.05122464755 0.05);
+            end     (0.059806344 0.08729154902 0.05);
+            nPoints 3749;
+        }
+        bl_x007
+        {
+            // x/c = 0.07 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.06999972803 0.05122464755 0.05);
+            end     (0.02920435877 0.1955695049 0.05);
+            nPoints 600;
+        }
+        bl_x010_inner
+        {
+            // x/c = 0.10 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.0999997889 0.05860118204 0.05);
+            end     (0.09208788571 0.09523625059 0.05);
+            nPoints 3749;
+        }
+        bl_x010
+        {
+            // x/c = 0.10 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.0999997889 0.05860118204 0.05);
+            end     (0.06833522969 0.2052199247 0.05);
+            nPoints 600;
+        }
+        bl_x015_inner
+        {
+            // x/c = 0.15 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.1499998532 0.06750139749 0.05);
+            end     (0.1444962975 0.1045748022 0.05);
+            nPoints 3749;
+        }
+        bl_x015
+        {
+            // x/c = 0.15 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.1499998532 0.06750139749 0.05);
+            end     (0.1279738426 0.2158744235 0.05);
+            nPoints 600;
+        }
+        bl_x020_inner
+        {
+            // x/c = 0.20 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.1999998913 0.07400085464 0.05);
+            end     (0.1959243496 0.1112582891 0.05);
+            nPoints 3749;
+        }
+        bl_x020
+        {
+            // x/c = 0.20 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.1999998913 0.07400085464 0.05);
+            end     (0.1836889953 0.2231103938 0.05);
+            nPoints 600;
+        }
+        bl_x030_inner
+        {
+            // x/c = 0.30 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.2999999449 0.08180093799 0.05);
+            end     (0.2979366811 0.119223784 0.05);
+            nPoints 3749;
+        }
+        bl_x030
+        {
+            // x/c = 0.30 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.2999999449 0.08180093799 0.05);
+            end     (0.2917424704 0.2315724777 0.05);
+            nPoints 600;
+        }
+        bl_x040_inner
+        {
+            // x/c = 0.40 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.3999999943 0.08460046709 0.05);
+            end     (0.3997847667 0.1220795297 0.05);
+            nPoints 3749;
+        }
+        bl_x040
+        {
+            // x/c = 0.40 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.3999999943 0.08460046709 0.05);
+            end     (0.3991386229 0.2345969939 0.05);
+            nPoints 600;
+        }
+        bl_x050_inner
+        {
+            // x/c = 0.50 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.500000042 0.08290099912 0.05);
+            end     (0.5015723968 0.1203476834 0.05);
+            nPoints 3749;
+        }
+        bl_x050
+        {
+            // x/c = 0.50 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.500000042 0.08290099912 0.05);
+            end     (0.5062928291 0.2327679429 0.05);
+            nPoints 600;
+        }
+        bl_x060_inner
+        {
+            // x/c = 0.60 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.6000000993 0.0760996626 0.05);
+            end     (0.6037216112 0.1133941234 0.05);
+            nPoints 3749;
+        }
+        bl_x060
+        {
+            // x/c = 0.60 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.6000000993 0.0760996626 0.05);
+            end     (0.6148941181 0.2253573867 0.05);
+            nPoints 600;
+        }
+        bl_x070_inner
+        {
+            // x/c = 0.70 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.7000001576 0.06290068111 0.05);
+            end     (0.7059076747 0.09991186457 0.05);
+            nPoints 3749;
+        }
+        bl_x070
+        {
+            // x/c = 0.70 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.7000001576 0.06290068111 0.05);
+            end     (0.7236428793 0.211024689 0.05);
+            nPoints 600;
+        }
+        bl_x080_inner
+        {
+            // x/c = 0.80 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.8000002011 0.04450090653 0.05);
+            end     (0.80753614 0.08121515558 0.05);
+            nPoints 3749;
+        }
+        bl_x080
+        {
+            // x/c = 0.80 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.8000002011 0.04450090653 0.05);
+            end     (0.8301600982 0.1914365408 0.05);
+            nPoints 600;
+        }
+        bl_x090_inner
+        {
+            // x/c = 0.90 on the upper (suction) surface -- inner sublayer line
+            type    uniform;
+            axis    distance;
+            start   (0.9000002241 0.02270087881 0.05);
+            end     (0.9083996438 0.05922725569 0.05);
+            nPoints 3749;
+        }
+        bl_x090
+        {
+            // x/c = 0.90 on the upper (suction) surface -- outer line
+            type    uniform;
+            axis    distance;
+            start   (0.9000002241 0.02270087881 0.05);
+            end     (0.9336158937 0.168884622 0.05);
+            nPoints 600;
+        }
+    );
+}
+
+// ************************************************************************* //

@@ -1,0 +1,97 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  fvSolution -- Phase-1 clean-section 2D validation case                     |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      fvSolution;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+solvers
+{
+    "(p|Phi)"
+    {
+        // GAMG: the pressure Poisson system on a graded C-grid spans ~6
+        // orders of magnitude in cell size; multigrid is the only solver
+        // that stays cheap across that range.
+        solver          GAMG;
+        smoother        GaussSeidel;
+        tolerance       1e-08;
+        relTol          0.01;
+    }
+
+    U
+    {
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-09;
+        relTol          0.01;
+    }
+
+    // Turbulence and transition scalars share one segregated setup; the
+    // tight absolute tolerance matters late in the run when the transition
+    // front is creeping toward its converged station.
+    "(k|omega|gammaInt|ReThetat)"
+    {
+        solver          smoothSolver;
+        smoother        symGaussSeidel;
+        tolerance       1e-09;
+        relTol          0.01;
+    }
+}
+
+SIMPLE
+{
+    consistent      no;
+
+    // One non-orthogonal corrector covers the nose-cut and blunt-base
+    // corner regions flagged in fvSchemes.
+    nNonOrthogonalCorrectors 2;
+
+    residualControl
+    {
+        // Spec gate is residuals < 1e-5; these stop thresholds sit BELOW
+        // the gate so a run that stops on residualControl has met the gate
+        // with margin (force-flatness, the other half of the gate, is
+        // audited downstream from the forceCoeffs history).
+        p               5e-06;
+        U               1e-06;
+        "(k|omega)"     1e-06;
+        "(gammaInt|ReThetat)" 1e-06;
+    }
+}
+
+relaxationFactors
+{
+    fields
+    {
+        // Classic SIMPLE pairing 0.3/0.7: chosen over SIMPLEC because the
+        // transition model's source terms respond badly to aggressive
+        // pressure updates near stall, and per-case wall time is not the
+        // bottleneck for a 2D polar.
+        p               0.2;
+    }
+    equations
+    {
+        U               0.5;
+        "(k|omega)"     0.7;
+        // Slightly tighter relaxation on the transition pair: their source
+        // terms are stiff around the transition front and over-relaxation
+        // makes the front oscillate instead of settling.
+        "(gammaInt|ReThetat)" 0.6;
+    }
+}
+
+// ************************************************************************* //
+
+// potentialFoam initialization controls (diagnostic case): extra
+// non-orthogonal sweeps because the Laplace init sees the raw mesh.
+potentialFlow
+{
+    nNonOrthogonalCorrectors 10;
+}

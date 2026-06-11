@@ -1,0 +1,77 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Turbulent kinetic energy -- Phase-1 clean-section 2D validation case       |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      k;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Inlet turbulence chain (documented so a reviewer can audit the numbers):
+//   XFOIL anchor uses e^N with Ncrit = 9. Mack's relation
+//       Ncrit = -8.43 - 2.4 ln(Tu)        (Tu as a fraction)
+//   inverts to Tu = exp(-(8.43 + Ncrit)/2.4) ~ 0.0007 = 0.07014 %.
+//   That Tu is the LE-INCIDENT target: the RANS transition model must see
+//   the e^N disturbance environment AT THE AIRFOIL, not at the boundary.
+//     k_LE (target)  = 1.5 (Tu * U)^2 = 0.00141687 m^2/s^2
+// Freestream decay compensation: between the boundary (25 c out) and the
+// leading edge, k decays analytically at the rate beta* k omega (uniform
+// freestream U turns the k equation into dk/dx = -beta* k omega / U), so
+//     k(LE) = k(boundary) * exp(-beta* omega_LE 25c / U)
+//           = k(boundary) * 0.607718
+// with beta* = 0.09 and omega_LE = 9.6999 (target-state omega at the
+// nut/nu = 10 ratio documented in 0/omega -- the top of the Langtry-Menter
+// 1..10 band, i.e. the slowest-decay end). The boundary value below is
+// therefore PRE-BOOSTED by the inverse factor,
+//     k_inf = k_LE / 0.607718 = 0.00233145 m^2/s^2,
+// so the decayed LE-incident Tu lands on the Mack/Ncrit-9 value exactly
+// (within the constant-omega analytic model; builder: inlet_turbulence in
+// scripts/build_validation_case.py).
+
+dimensions      [0 2 -2 0 0 0 0];
+
+internalField   uniform 0.00233145;
+
+boundaryField
+{
+    airfoil
+    {
+        // Low-Re (wall-resolved) treatment: k -> 0 at a smooth wall. A tiny
+        // positive floor instead of an exact zero keeps k off the absolute
+        // zero that some limiters and post-processing ratios dislike, while
+        // being ~7 orders below the freestream level -- physically zero.
+        type            fixedValue;
+        value           uniform 1e-10;
+    }
+
+    farfield
+    {
+        // Freestream level where flow enters, zeroGradient where it leaves
+        // (inletOutlet), matching the freestream U/p pairing on this patch.
+        type            inletOutlet;
+        inletValue      uniform 0.00233145;
+        value           uniform 0.00233145;
+    }
+
+    outlet
+    {
+        // Wake leaves through here; backflow guard returns the freestream
+        // level rather than amplifying whatever was advected out.
+        type            inletOutlet;
+        inletValue      uniform 0.00233145;
+        value           uniform 0.00233145;
+    }
+
+    frontAndBack
+    {
+        // 2D empty direction.
+        type            empty;
+    }
+}
+
+// ************************************************************************* //

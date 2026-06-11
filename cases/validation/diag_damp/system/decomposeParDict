@@ -1,0 +1,32 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  decomposeParDict -- Phase-1 clean-section 2D validation case               |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      decomposeParDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Rank count SCALES with refinement level -- 2/4/8 at level 0/1/2, filled
+// by the case builder (subdomains_for_level in build_validation_case.py).
+// The 2D cell budget roughly doubles per level (~27k/54k/107k cells), so
+// doubling the ranks holds ~13k cells/core at every level; a flat 8 ranks
+// would starve level 0 at ~3.4k cells/core, where MPI overhead eats the
+// speedup. The modest per-case width also leaves the 24C/32T host room to
+// run several AoA points of the polar concurrently, which is how the sweep
+// runner schedules them. Allrun reads this value back via foamDictionary,
+// so the dictionary stays the single authority on the mpirun -np count.
+
+numberOfSubdomains 2;
+
+// Graph partitioning: scotch needs no geometric hints and handles the
+// strongly-graded C-topology better than 'simple' axis-aligned slabs, which
+// would put all the tiny BL cells in one rank.
+method          scotch;
+
+// ************************************************************************* //

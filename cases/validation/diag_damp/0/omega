@@ -1,0 +1,70 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+|  Specific dissipation rate -- Phase-1 clean-section 2D validation case      |
+|  Instantiated from cases/validation_2d/template by                          |
+|  scripts/build_validation_case.py                                           |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    object      omega;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// omega_inf = k_inf / (nu * (nut/nu)) with eddy-viscosity ratio nut/nu = 10,
+// the TOP of the Langtry-Menter recommended 1..10 inlet band. The high ratio
+// is chosen deliberately: freestream k decays as dk/dt = -beta* k omega, so
+// the SMALLEST admissible omega gives the SLOWEST Tu decay over the 25 c of
+// travel between the far boundary and the airfoil. The residual decay is
+// then PRE-COMPENSATED (see 0/k): the boundary k is boosted by the inverse
+// analytic decay factor 1/0.607718 so the LE-incident Tu equals the
+// Mack/Ncrit-9 value, and this omega is recomputed from the boosted k to
+// hold nut/nu = 10 at the boundary:
+//     omega_inf = 15.9612   (boundary value below)
+//     omega_LE  = 9.6999    (target-state omega; sets the decay rate
+//                                in the compensation exponent)
+
+dimensions      [0 0 -1 0 0 0 0];
+
+internalField   uniform 15.9612;
+
+boundaryField
+{
+    airfoil
+    {
+        // omegaWallFunction is NOT a high-Re compromise: in ESI OpenFOAM it
+        // blends the viscous-sublayer asymptote omega = 6 nu / (beta1 y^2)
+        // with the log-layer value and is the recommended omega condition
+        // down to y+ < 1 (Menter's boundary condition is singular at the
+        // wall and cannot be imposed as a finite fixedValue). The 'value'
+        // entry is only an initial placeholder; the function overwrites it.
+        type            omegaWallFunction;
+        blending        binomial;
+        value           uniform 15.9612;
+    }
+
+    farfield
+    {
+        // Freestream level on inflow, zeroGradient on outflow -- consistent
+        // with the freestream U/p treatment of this boundary.
+        type            inletOutlet;
+        inletValue      uniform 15.9612;
+        value           uniform 15.9612;
+    }
+
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      uniform 15.9612;
+        value           uniform 15.9612;
+    }
+
+    frontAndBack
+    {
+        // 2D empty direction.
+        type            empty;
+    }
+}
+
+// ************************************************************************* //
