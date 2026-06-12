@@ -12,10 +12,15 @@ FoamFile
 
 // Background hex box for snappy: base 0.1 m cells in x/y and a single
 // cell across the one-pitch span (snappy's refinement subdivides z too,
-// reaching sub-mm at the vane band). Sides are plain patches carrying a
-// slip BC - for the steady mean flow of a mirror-symmetric VG array this
-// is exactly the symmetry condition, without symmetryPlane's planarity
-// fussiness after snapping.
+// reaching sub-mm at the vane band).
+//
+// Side boundaries are CYCLIC: true span periodicity is exact for the
+// infinite VG array, and it deliberately avoids RapidCFD's transform
+// patches (slip/symmetryPlane) whose 2.3-era PISO/SIMPLE algebra injects
+// spurious tangential wall friction on the GPU (proven by the uniform-flow
+// reproducer; modern OpenFOAM fixed this class of artifact via
+// constrainHbyA). Top/bottom are freestream for the same reason - plain
+// inletOutlet machinery, no transform path, and less blockage than slip.
 convertToMeters 1;
 
 vertices
@@ -39,6 +44,11 @@ boundary
     outlet   { type patch; faces ((1 2 6 5)); }
     top      { type patch; faces ((3 7 6 2)); }
     bottom   { type patch; faces ((0 1 5 4)); }
+    // Sides are meshed as PLAIN patches (snappy's layer extrusion aborts
+    // when wall geometry pierces a cyclic boundary) and converted to a
+    // translational cyclic pair afterwards by createPatch - the geometry
+    // is z-extruded, so the two planes castellate/snap/layer identically
+    // and the faces match by translation.
     sideLeft { type patch; faces ((0 3 2 1)); }
     sideRight{ type patch; faces ((4 5 6 7)); }
 );

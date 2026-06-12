@@ -74,15 +74,22 @@ NU = 1.48e-05            # m^2/s, standard air (matches the M1 pipeline)
 RE = 2.2e6               # stall-regime chord Reynolds (80 mph @ 0.9022 m)
 SPAN_OVERHANG = 1.2      # STL span / domain span: pierce the side planes
 
-# The four study cases: (name, vane height mm or None, alpha deg)
+# The study cases: (name, vane height mm or None, alpha deg, vane x/c or None)
 # - clean_a08 is the pipeline-sanity point (attached flow, Cl well known
 #   from XFOIL/NASA - fully-turbulent kOmegaSST should land ~5-10% low)
 # - a18 is the discriminating angle from the FluidX3D Act-III post-mortem
+# - x/c None = the IMP74 default station (chord_position_frac, 0.07)
+# - the xNN cases sweep the row aft: fielded Glasair installs have been
+#   spotted anywhere from just behind the LE to roughly mid-chord, so the
+#   sweep brackets that range at the 12 mm height / 50 mm pitch point
 CASE_MATRIX = [
-    ("clean_a08", None, 8.0),
-    ("clean_a18", None, 18.0),
-    ("vg12p50_a18", 12.0, 18.0),
-    ("vg16p50_a18", 16.0, 18.0),
+    ("clean_a08", None, 8.0, None),
+    ("clean_a18", None, 18.0, None),
+    ("vg12p50_a18", 12.0, 18.0, None),
+    ("vg16p50_a18", 16.0, 18.0, None),
+    ("vg12x15_a18", 12.0, 18.0, 0.15),
+    ("vg12x30_a18", 12.0, 18.0, 0.30),
+    ("vg12x45_a18", 12.0, 18.0, 0.45),
 ]
 
 
@@ -114,7 +121,8 @@ def make_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
 
 
 def build_article(name: str, h_mm: float | None, alpha_deg: float,
-                  ac, coords: np.ndarray, domain_span: float) -> tuple[Path, Path | None]:
+                  ac, coords: np.ndarray, domain_span: float,
+                  x_frac_override: float | None = None) -> tuple[Path, Path | None]:
     """Build one wall article (wing [+ vane pair]), rotated to alpha.
 
     Returns (wall_stl, vanes_stl-or-None). The vanes-only STL is exported
@@ -124,7 +132,10 @@ def build_article(name: str, h_mm: float | None, alpha_deg: float,
     """
     chord = ac.wing.aileron.chord_at_mid_station          # 0.9022 m [DXF]
     pitch = ac.vg_defaults.wing.spacing_outboard          # 0.050 m  [IMP74]
-    x_frac = ac.vg_defaults.wing.chord_position_frac      # 0.07     [IMP74]
+    # Chordwise station of the vane row: study default from IMP74 unless a
+    # matrix entry overrides it (the placement-sweep cases).
+    x_frac = (x_frac_override if x_frac_override is not None
+              else ac.vg_defaults.wing.chord_position_frac)  # 0.07   [IMP74]
     beta = ac.vg_defaults.vane_incidence                  # 15 deg, radians
     l_per_h = ac.vg_defaults.vane_length_per_height       # 3.0
 
@@ -216,10 +227,15 @@ def block_mesh_dict(pitch: float) -> str:
     return foam_header("dictionary", "blockMeshDict") + f"""
 // Background hex box for snappy: base {BASE} m cells in x/y and a single
 // cell across the one-pitch span (snappy's refinement subdivides z too,
-// reaching sub-mm at the vane band). Sides are plain patches carrying a
-// slip BC - for the steady mean flow of a mirror-symmetric VG array this
-// is exactly the symmetry condition, without symmetryPlane's planarity
-// fussiness after snapping.
+// reaching sub-mm at the vane band).
+//
+// Side boundaries are CYCLIC: true span periodicity is exact for the
+// infinite VG array, and it deliberately avoids RapidCFD's transform
+// patches (slip/symmetryPlane) whose 2.3-era PISO/SIMPLE algebra injects
+// spurious tangential wall friction on the GPU (proven by the uniform-flow
+// reproducer; modern OpenFOAM fixed this class of artifact via
+// constrainHbyA). Top/bottom are freestream for the same reason - plain
+// inletOutlet machinery, no transform path, and less blockage than slip.
 convertToMeters 1;
 
 vertices
@@ -243,6 +259,11 @@ boundary
     outlet   {{ type patch; faces ((1 2 6 5)); }}
     top      {{ type patch; faces ((3 7 6 2)); }}
     bottom   {{ type patch; faces ((0 1 5 4)); }}
+    // Sides are meshed as PLAIN patches (snappy's layer extrusion aborts
+    // when wall geometry pierces a cyclic boundary) and converted to a
+    // translational cyclic pair afterwards by createPatch - the geometry
+    // is z-extruded, so the two planes castellate/snap/layer identically
+    // and the faces match by translation.
     sideLeft {{ type patch; faces ((0 3 2 1)); }}
     sideRight{{ type patch; faces ((4 5 6 7)); }}
 );
@@ -403,6 +424,45 @@ meshQualityControls
 
 debug 0;
 mergeTolerance 1e-6;
+"""
+
+
+def create_patch_dict(pitch: float) -> str:
+    return foam_header("dictionary", "createPatchDict") + f"""
+// Post-snappy conversion of the side planes into a translational cyclic
+// pair (see blockMeshDict header for why they are meshed as plain patches).
+pointSync false;
+
+patches
+(
+    {{
+        name sideL;
+        patchInfo
+        {{
+            type            cyclicAMI;
+            neighbourPatch  sideR;
+            transform       translational;
+            separationVector (0 0 {pitch});
+            matchTolerance  1e-3;
+        }}
+        constructFrom patches;
+        patches (sideLeft);
+    }}
+
+    {{
+        name sideR;
+        patchInfo
+        {{
+            type            cyclicAMI;
+            neighbourPatch  sideL;
+            transform       translational;
+            separationVector (0 0 {-pitch});
+            matchTolerance  1e-3;
+        }}
+        constructFrom patches;
+        patches (sideRight);
+    }}
+);
 """
 
 
@@ -634,18 +694,32 @@ def field_file(name: str, dims: str, internal: str, bcs: dict[str, str]) -> str:
 
 
 def zero_dir(u_inf: float) -> dict[str, str]:
-    """All 0/ fields. Freestream turbulence: I=0.5%, nut/nu ~ 8."""
+    """All 0/ fields. Freestream turbulence: I=0.5%, nut/nu ~ 8.
+
+    No slip/symmetry anywhere: sides are cyclic (exact span periodicity)
+    and top/bottom use the freestream (per-face inletOutlet) family -
+    RapidCFD's transform-patch algebra is avoided entirely (GPU artifact,
+    see blockMeshDict header).
+    """
     k_inf = 1.5 * (u_inf * 0.005) ** 2          # ~0.049 m2/s2
     omega_inf = k_inf / (8.0 * NU)              # nut = k/omega = 8 nu
-    slip = "        type            slip;\n"
+    cyc = "        type            cyclicAMI;\n"
     fields = {}
+
+    fs_u = (f"        type            freestream;\n"
+            f"        freestreamValue uniform ({u_inf:.4f} 0 0);\n")
+    fs_k = (f"        type            freestream;\n"
+            f"        freestreamValue uniform {k_inf:.6g};\n")
+    fs_w = (f"        type            freestream;\n"
+            f"        freestreamValue uniform {omega_inf:.6g};\n")
 
     fields["U"] = field_file(
         "U", "[0 1 -1 0 0 0 0]", f"uniform ({u_inf:.4f} 0 0)",
         {
             "inlet":   f"        type            fixedValue;\n        value           uniform ({u_inf:.4f} 0 0);\n",
             "outlet":  f"        type            inletOutlet;\n        inletValue      uniform (0 0 0);\n        value           uniform ({u_inf:.4f} 0 0);\n",
-            "top": slip, "bottom": slip, "sideLeft": slip, "sideRight": slip,
+            "top": fs_u, "bottom": fs_u,
+            "sideL": cyc, "sideR": cyc,
             "wing":    "        type            fixedValue;\n        value           uniform (0 0 0);\n",
         })
 
@@ -654,7 +728,9 @@ def zero_dir(u_inf: float) -> dict[str, str]:
         {
             "inlet":   "        type            zeroGradient;\n",
             "outlet":  "        type            fixedValue;\n        value           uniform 0;\n",
-            "top": slip, "bottom": slip, "sideLeft": slip, "sideRight": slip,
+            "top": "        type            zeroGradient;\n",
+            "bottom": "        type            zeroGradient;\n",
+            "sideL": cyc, "sideR": cyc,
             "wing":    "        type            zeroGradient;\n",
         })
 
@@ -663,7 +739,8 @@ def zero_dir(u_inf: float) -> dict[str, str]:
         {
             "inlet":   f"        type            fixedValue;\n        value           uniform {k_inf:.6g};\n",
             "outlet":  f"        type            inletOutlet;\n        inletValue      uniform {k_inf:.6g};\n        value           uniform {k_inf:.6g};\n",
-            "top": slip, "bottom": slip, "sideLeft": slip, "sideRight": slip,
+            "top": fs_k, "bottom": fs_k,
+            "sideL": cyc, "sideR": cyc,
             "wing":    f"        type            kqRWallFunction;\n        value           uniform {k_inf:.6g};\n",
         })
 
@@ -672,7 +749,8 @@ def zero_dir(u_inf: float) -> dict[str, str]:
         {
             "inlet":   f"        type            fixedValue;\n        value           uniform {omega_inf:.6g};\n",
             "outlet":  f"        type            inletOutlet;\n        inletValue      uniform {omega_inf:.6g};\n        value           uniform {omega_inf:.6g};\n",
-            "top": slip, "bottom": slip, "sideLeft": slip, "sideRight": slip,
+            "top": fs_w, "bottom": fs_w,
+            "sideL": cyc, "sideR": cyc,
             "wing":    f"        type            omegaWallFunction;\n        value           uniform {omega_inf:.6g};\n",
         })
 
@@ -681,7 +759,9 @@ def zero_dir(u_inf: float) -> dict[str, str]:
         {
             "inlet":   "        type            calculated;\n        value           uniform 0;\n",
             "outlet":  "        type            calculated;\n        value           uniform 0;\n",
-            "top": slip, "bottom": slip, "sideLeft": slip, "sideRight": slip,
+            "top": "        type            calculated;\n        value           uniform 0;\n",
+            "bottom": "        type            calculated;\n        value           uniform 0;\n",
+            "sideL": cyc, "sideR": cyc,
             "wing":    "        type            nutkWallFunction;\n        value           uniform 0;\n",
         })
     return fields
@@ -707,6 +787,7 @@ def write_case(name: str, wall_stl: Path, vanes_stl: Path | None,
 
     (case / "system" / "blockMeshDict").write_text(block_mesh_dict(pitch))
     (case / "system" / "snappyHexMeshDict").write_text(snappy_dict(vanes_stl is not None))
+    (case / "system" / "createPatchDict").write_text(create_patch_dict(pitch))
     (case / "system" / "surfaceFeatureExtractDict").write_text(surface_features_dict())
     (case / "system" / "controlDict").write_text(control_dict(u_inf, chord, pitch, n_iter))
     # Stage 1 = dissipative upwind (startup damping), stage 2 = TVD scheme
@@ -765,8 +846,22 @@ for case in "$@"; do
                 || surfaceFeatures > log.surfaceFeatureExtract 2>&1
             blockMesh           > log.blockMesh 2>&1            || exit 1
             snappyHexMesh -overwrite > log.snappyHexMesh 2>&1   || exit 1
+            # Convert the plain side patches into the translational cyclic
+            # pair (meshing directly with cyclic sides crashes the layer
+            # extrusion when the wall geometry pierces the boundary).
+            createPatch -overwrite > log.createPatch 2>&1       || exit 1
+            # createPatch may emit the repatched mesh into 0/ depending on
+            # startFrom; the solver and renumberMesh expect it in constant/.
+            if [ -d 0/polyMesh ]; then
+                rm -rf constant/polyMesh
+                mv 0/polyMesh constant/polyMesh
+            fi
             checkMesh           > log.checkMesh 2>&1
-            renumberMesh -overwrite > log.renumberMesh 2>&1
+            # No renumberMesh: v2506's renumber rewrites the boundary file
+            # before it renumbers fields, and it dies on the 2.3-dialect
+            # cyclic field entries - leaving the mesh de-cycled. The GPU
+            # solver does not need the bandwidth ordering badly enough to
+            # risk that.
         ) || { echo "[$case] MESHING FAILED"
                for f in "$dst"/log.*; do echo "--- $f"; tail -20 "$f"; done
                continue; }
@@ -821,6 +916,15 @@ done
 
 
 def main() -> None:
+    # Optional case filter: `--only nameA nameB` rebuilds just those matrix
+    # entries (used to add sweep cases without touching ones already staged
+    # or mid-solve in WSL - write_case wipes the case dir it rebuilds).
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", nargs="+", metavar="CASE",
+                    help="build only these CASE_MATRIX entries")
+    opts = ap.parse_args()
+
     ac = load_aircraft(REPO / "aircraft.yaml")
     chord = ac.wing.aileron.chord_at_mid_station
     pitch = ac.vg_defaults.wing.spacing_outboard
@@ -832,15 +936,23 @@ def main() -> None:
     coords = resample_airfoil(load_airfoil(REPO / "geometry" / "ls413.dat"),
                               n_points=241, te="blunt")
 
-    for name, h_mm, alpha in CASE_MATRIX:
-        wall, vanes = build_article(name, h_mm, alpha, ac, coords, pitch)
+    selected = [row for row in CASE_MATRIX
+                if not opts.only or row[0] in opts.only]
+    if opts.only:
+        missing = set(opts.only) - {row[0] for row in selected}
+        if missing:
+            raise SystemExit(f"[build] not in CASE_MATRIX: {sorted(missing)}")
+
+    for name, h_mm, alpha, x_frac in selected:
+        wall, vanes = build_article(name, h_mm, alpha, ac, coords, pitch,
+                                    x_frac_override=x_frac)
         write_case(name, wall, vanes, u_inf, chord, pitch, n_iter=4000)
 
     runner = HERE / "run_all.sh"
     runner.write_text(RUNNER, newline="\n")
     print(f"[build] runner: {runner}")
     print("[build] WSL:  bash gpu/rapidcfd/run_all.sh " +
-          " ".join(n for n, _, _ in CASE_MATRIX))
+          " ".join(row[0] for row in selected))
 
 
 if __name__ == "__main__":

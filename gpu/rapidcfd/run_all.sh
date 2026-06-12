@@ -34,8 +34,22 @@ for case in "$@"; do
                 || surfaceFeatures > log.surfaceFeatureExtract 2>&1
             blockMesh           > log.blockMesh 2>&1            || exit 1
             snappyHexMesh -overwrite > log.snappyHexMesh 2>&1   || exit 1
+            # Convert the plain side patches into the translational cyclic
+            # pair (meshing directly with cyclic sides crashes the layer
+            # extrusion when the wall geometry pierces the boundary).
+            createPatch -overwrite > log.createPatch 2>&1       || exit 1
+            # createPatch may emit the repatched mesh into 0/ depending on
+            # startFrom; the solver and renumberMesh expect it in constant/.
+            if [ -d 0/polyMesh ]; then
+                rm -rf constant/polyMesh
+                mv 0/polyMesh constant/polyMesh
+            fi
             checkMesh           > log.checkMesh 2>&1
-            renumberMesh -overwrite > log.renumberMesh 2>&1
+            # No renumberMesh: v2506's renumber rewrites the boundary file
+            # before it renumbers fields, and it dies on the 2.3-dialect
+            # cyclic field entries - leaving the mesh de-cycled. The GPU
+            # solver does not need the bandwidth ordering badly enough to
+            # risk that.
         ) || { echo "[$case] MESHING FAILED"
                for f in "$dst"/log.*; do echo "--- $f"; tail -20 "$f"; done
                continue; }

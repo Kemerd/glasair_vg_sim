@@ -23,10 +23,15 @@ RESULTS = HERE / "results"
 
 def load_coeffs(case: str) -> np.ndarray | None:
     """(N,4) array of [iter, Cm, Cd, Cl] or None when the case has no data."""
-    # 2.3 writes one dat file per startTime directory; take them all in
-    # time order so restarted runs concatenate cleanly.
-    dats = sorted((RESULTS / case / "postProcessing").rglob("forceCoeffs.dat"))
-    rows: list[list[float]] = []
+    # 2.3 writes one dat file per startTime directory - and when a RESTART
+    # finds an existing forceCoeffs.dat it sidesteps to forceCoeffs_<t>.dat
+    # instead of appending, so glob the whole family. Lexicographic sort
+    # keeps forceCoeffs.dat ('.' < '_') ahead of its restart siblings, so
+    # later files legitimately shadow earlier ones in the dedup below.
+    dats = sorted((RESULTS / case / "postProcessing").rglob("forceCoeffs*.dat"))
+    # A killed run and its restart overlap in time; keyed by iteration, the
+    # later file's row simply overwrites the earlier one's.
+    by_time: dict[float, list[float]] = {}
     for dat in dats:
         for line in dat.read_text().splitlines():
             if line.startswith("#") or not line.strip():
@@ -34,11 +39,10 @@ def load_coeffs(case: str) -> np.ndarray | None:
             # Whitespace OR parenthesis separated; keep the leading 4 cols.
             vals = [float(v) for v in re.split(r"[\s()]+", line.strip()) if v]
             if len(vals) >= 4:
-                rows.append(vals[:4])
-    if not rows:
+                by_time[vals[0]] = vals[:4]
+    if not by_time:
         return None
-    arr = np.asarray(rows, dtype=float)
-    return arr[np.argsort(arr[:, 0], kind="stable")]
+    return np.asarray([by_time[t] for t in sorted(by_time)], dtype=float)
 
 
 def tail_stats(arr: np.ndarray, tail: int) -> dict[str, float]:

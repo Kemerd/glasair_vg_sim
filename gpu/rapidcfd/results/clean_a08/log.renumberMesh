@@ -9,9 +9,9 @@ Build  : _d6aa836d-20260127 OPENFOAM=2506 patch=260127 version=2506
 Arch   : "LSB;label=32;scalar=64"
 Exec   : renumberMesh -overwrite
 Date   : Jun 11 2026
-Time   : 12:53:36
+Time   : 17:56:46
 Host   : EVERETT-STATION
-PID    : 5018
+PID    : 2637
 I/O    : uncollated
 Case   : /home/donny-linux/glasair_rapidcfd/clean_a08
 nProcs : 1
@@ -32,28 +32,28 @@ Before renumbering
 Using renumber-method: CuthillMcKee [default]
 
 Reading fields
-    volScalarField: k nut omega p
-    volVectorField: U
+    volScalarField: k
 
-After renumbering
-    band           : 45329
-    profile        : 4.848097e+10
+--> FOAM FATAL IO ERROR: (openfoam-2506 patch=260127)
+Attempt to cast type patch to type lduInterface
 
-Writing mesh to "constant"
-Reading hexRef8 data : cellLevel
-Reading hexRef8 data : pointLevel
-Reading hexRef8 data : level0Edge
+file: 0/k/boundaryField/sideLeft at line 45.
 
-Timings:
-    read mesh   : 4.806776
-    read fields : 0.3631992
-    decompose   : 0
-    cell-cells  : 0
-    renumber    : 0.553994
-    write       : 2.902209
-TotalTime = 9.691387 s
+    From Type& Foam::refCast(U&, const dictionary&) [with Type = const lduInterface; U = const fvPatch]
+    in file ./src/OpenFOAM/lnInclude/typeInfo.H at line 208.
 
-ExecutionTime = 9.8 s  ClockTime = 9 s
+FOAM aborting
 
-End
-
+[stack trace]
+=============
+#1  Foam::error::simpleExit(int, bool) in /usr/lib/openfoam/openfoam2506/platforms/linux64GccDPInt32Opt/lib/libOpenFOAM.so
+#2  Foam::fvPatchField<double>::adddictionaryConstructorToTable<Foam::cyclicFvPatchField<double> >::New(Foam::fvPatch const&, Foam::DimensionedField<double, Foam::volMesh> const&, Foam::dictionary const&) in /usr/lib/openfoam/openfoam2506/platforms/linux64GccDPInt32Opt/lib/libfiniteVolume.so
+#3  ? in /usr/lib/openfoam/openfoam2506/platforms/linux64GccDPInt32Opt/bin/renumberMesh
+#4  ? in /usr/lib/openfoam/openfoam2506/platforms/linux64GccDPInt32Opt/bin/renumberMesh
+#5  ? in /usr/lib/openfoam/openfoam2506/platforms/linux64GccDPInt32Opt/bin/renumberMesh
+#6  ? in /usr/lib/openfoam/openfoam2506/platforms/linux64GccDPInt32Opt/bin/renumberMesh
+#7  ? in /usr/lib/openfoam/openfoam2506/platforms/linux64GccDPInt32Opt/bin/renumberMesh
+#8  ? in /lib/x86_64-linux-gnu/libc.so.6
+#9  __libc_start_main in /lib/x86_64-linux-gnu/libc.so.6
+#10  ? in /usr/lib/openfoam/openfoam2506/platforms/linux64GccDPInt32Opt/bin/renumberMesh
+=============
