@@ -74,7 +74,9 @@ NU = 1.48e-05            # m^2/s, standard air (matches the M1 pipeline)
 RE = 2.2e6               # stall-regime chord Reynolds (80 mph @ 0.9022 m)
 SPAN_OVERHANG = 1.2      # STL span / domain span: pierce the side planes
 
-# The study cases: (name, vane height mm or None, alpha deg, vane x/c or None)
+# The study cases, one row each:
+#   (name, vane height mm or None, alpha deg, vane x/c or None,
+#    Re or None, vane shape or None)
 # - clean_a08 is the pipeline-sanity point (attached flow, Cl well known
 #   from XFOIL/NASA - fully-turbulent kOmegaSST should land ~5-10% low)
 # - a18 is the discriminating angle from the FluidX3D Act-III post-mortem
@@ -82,14 +84,26 @@ SPAN_OVERHANG = 1.2      # STL span / domain span: pierce the side planes
 # - the xNN cases sweep the row aft: fielded Glasair installs have been
 #   spotted anywhere from just behind the LE to roughly mid-chord, so the
 #   sweep brackets that range at the 12 mm height / 50 mm pitch point
+# - Re None = study default (stall-regime 2.2e6); the a02 cruise pair runs
+#   at the 200 mph drag-tax point (Re 5.52e6, same condition as the
+#   FluidX3D Act-IV cruise block) so the VG drag count is measured where
+#   the airplane actually spends fast flight
+# - shape None = "rect" (flat rectangular plate); "delta" = triangular
+#   ramp planform (apex forward, full height at the vane TE) as used by
+#   most retrofit kits - A/B against the rectangular winner at alpha 18
 CASE_MATRIX = [
-    ("clean_a08", None, 8.0, None),
-    ("clean_a18", None, 18.0, None),
-    ("vg12p50_a18", 12.0, 18.0, None),
-    ("vg16p50_a18", 16.0, 18.0, None),
-    ("vg12x15_a18", 12.0, 18.0, 0.15),
-    ("vg12x30_a18", 12.0, 18.0, 0.30),
-    ("vg12x45_a18", 12.0, 18.0, 0.45),
+    ("clean_a08", None, 8.0, None, None, None),
+    ("clean_a18", None, 18.0, None, None, None),
+    ("vg12p50_a18", 12.0, 18.0, None, None, None),
+    ("vg16p50_a18", 16.0, 18.0, None, None, None),
+    ("vg12x15_a18", 12.0, 18.0, 0.15, None, None),
+    ("vg12x30_a18", 12.0, 18.0, 0.30, None, None),
+    ("vg12x45_a18", 12.0, 18.0, 0.45, None, None),
+    ("clean_a02", None, 2.0, None, 5.52e6, None),
+    ("vg12p50_a02", 12.0, 2.0, None, 5.52e6, None),
+    ("clean_a16", None, 16.0, None, None, None),
+    ("vg12p50_a16", 12.0, 16.0, None, None, None),
+    ("vg12d50_a18", 12.0, 18.0, None, None, "delta"),
 ]
 
 
@@ -120,9 +134,35 @@ def make_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
     return box
 
 
+def make_delta_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
+    """One triangular ("delta") vane plate in the same frame as make_vane:
+    LE (apex) at the origin, +x along the plate, +y up.
+
+    The planform ramps from zero height at the apex to the full height h at
+    the vane trailing edge - the shape most retrofit VG kits ship. Built as
+    an explicit 6-vertex prism (two triangular caps + three quad sides)
+    rather than via extrude_polygon so there is no shapely dependency.
+    """
+    t = thick / 2.0
+    verts = np.array([
+        [0.0, 0.0, -t], [length, 0.0, -t], [length, h, -t],   # cap z = -t
+        [0.0, 0.0, +t], [length, 0.0, +t], [length, h, +t],   # cap z = +t
+    ])
+    faces = np.array([
+        [0, 2, 1], [3, 4, 5],          # the two triangular caps
+        [0, 1, 4], [0, 4, 3],          # bottom edge (sits on / in the skin)
+        [1, 2, 5], [1, 5, 4],          # vertical trailing edge
+        [2, 0, 3], [2, 3, 5],          # ramped hypotenuse (the "delta" edge)
+    ])
+    tri = trimesh.Trimesh(vertices=verts, faces=faces, process=True)
+    tri.fix_normals()                  # guarantee outward, consistent winding
+    return tri
+
+
 def build_article(name: str, h_mm: float | None, alpha_deg: float,
                   ac, coords: np.ndarray, domain_span: float,
-                  x_frac_override: float | None = None) -> tuple[Path, Path | None]:
+                  x_frac_override: float | None = None,
+                  shape: str = "rect") -> tuple[Path, Path | None]:
     """Build one wall article (wing [+ vane pair]), rotated to alpha.
 
     Returns (wall_stl, vanes_stl-or-None). The vanes-only STL is exported
@@ -155,9 +195,11 @@ def build_article(name: str, h_mm: float | None, alpha_deg: float,
 
         # One toe-out pair centered on the slice: vanes at z = +/- pitch/4,
         # incidence +/- beta, laid flush on the local skin slope and sunk
-        # 0.1h so the union has guaranteed overlap.
+        # 0.1h so the union has guaranteed overlap. Planform per the matrix:
+        # rectangular plate (study default) or triangular delta ramp.
+        vane_builder = make_delta_vane if shape == "delta" else make_vane
         for sgn in (+1.0, -1.0):
-            v = make_vane(h, vane_l, vane_t)
+            v = vane_builder(h, vane_l, vane_t)
             v.apply_transform(trimesh.transformations.rotation_matrix(
                 sgn * beta, (0.0, 1.0, 0.0)))
             v.apply_transform(trimesh.transformations.rotation_matrix(
@@ -928,10 +970,9 @@ def main() -> None:
     ac = load_aircraft(REPO / "aircraft.yaml")
     chord = ac.wing.aileron.chord_at_mid_station
     pitch = ac.vg_defaults.wing.spacing_outboard
-    u_inf = RE * NU / chord
 
     print(f"[build] chord={chord:.4f} m  pitch={pitch * 1000:.0f} mm  "
-          f"U={u_inf:.2f} m/s (Re {RE:.2g})")
+          f"(study Re {RE:.2g} -> U={RE * NU / chord:.2f} m/s)")
 
     coords = resample_airfoil(load_airfoil(REPO / "geometry" / "ls413.dat"),
                               n_points=241, te="blunt")
@@ -943,9 +984,18 @@ def main() -> None:
         if missing:
             raise SystemExit(f"[build] not in CASE_MATRIX: {sorted(missing)}")
 
-    for name, h_mm, alpha, x_frac in selected:
+    # Each row carries its own (Re, shape); Re None falls back to the study
+    # default 2.2e6 and shape None to the rectangular plate. The freestream
+    # speed is recomputed per case so the cruise pair (Re 5.52e6) and the
+    # stall cases share one geometry pipeline but different magUInf/BCs.
+    for name, h_mm, alpha, x_frac, re_case, shape in selected:
+        re_eff = re_case if re_case is not None else RE
+        u_inf = re_eff * NU / chord
+        print(f"[build] {name}: alpha={alpha:g}deg  Re={re_eff:.2g}  "
+              f"U={u_inf:.2f} m/s  shape={shape or 'rect'}")
         wall, vanes = build_article(name, h_mm, alpha, ac, coords, pitch,
-                                    x_frac_override=x_frac)
+                                    x_frac_override=x_frac,
+                                    shape=shape or "rect")
         write_case(name, wall, vanes, u_inf, chord, pitch, n_iter=4000)
 
     runner = HERE / "run_all.sh"
