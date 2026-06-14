@@ -1,0 +1,21 @@
+/*--------------------------------*- C++ -*----------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "constant";
+    object      RASProperties;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+// kOmegaSST fully-turbulent: RapidCFD carries no transition model (the
+// documented limitation that parked it for M1); acceptable here because
+// the NASA anchors at Re 2.2e6 are TRIPPED data and the study question is
+// the VG-on vs VG-off DELTA, not absolute transition location.
+RASModel        kOmegaSST;
+
+turbulence      on;
+
+printCoeffs     on;

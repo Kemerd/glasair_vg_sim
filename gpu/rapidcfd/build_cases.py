@@ -74,36 +74,76 @@ NU = 1.48e-05            # m^2/s, standard air (matches the M1 pipeline)
 RE = 2.2e6               # stall-regime chord Reynolds (80 mph @ 0.9022 m)
 SPAN_OVERHANG = 1.2      # STL span / domain span: pierce the side planes
 
-# The study cases, one row each:
-#   (name, vane height mm or None, alpha deg, vane x/c or None,
-#    Re or None, vane shape or None)
-# - clean_a08 is the pipeline-sanity point (attached flow, Cl well known
-#   from XFOIL/NASA - fully-turbulent kOmegaSST should land ~5-10% low)
-# - a18 is the discriminating angle from the FluidX3D Act-III post-mortem
-# - x/c None = the IMP74 default station (chord_position_frac, 0.07)
-# - the xNN cases sweep the row aft: fielded Glasair installs have been
-#   spotted anywhere from just behind the LE to roughly mid-chord, so the
-#   sweep brackets that range at the 12 mm height / 50 mm pitch point
-# - Re None = study default (stall-regime 2.2e6); the a02 cruise pair runs
-#   at the 200 mph drag-tax point (Re 5.52e6, same condition as the
-#   FluidX3D Act-IV cruise block) so the VG drag count is measured where
-#   the airplane actually spends fast flight
-# - shape None = "rect" (flat rectangular plate); "delta" = triangular
-#   ramp planform (apex forward, full height at the vane TE) as used by
-#   most retrofit kits - A/B against the rectangular winner at alpha 18
+# Each study case is a dict so fields can be added without re-numbering
+# positional tuples. `case()` fills the defaults; only the knobs that differ
+# from the study baseline need to be named per row.
+#   name   : case + results dir name
+#   h_mm   : vane height in mm, or None for the clean wing
+#   alpha  : geometric angle of attack, degrees (baked into the STL)
+#   x_frac : chord station of the vane row (None -> IMP74 0.07)
+#   re     : chord Reynolds (None -> study default 2.2e6 stall regime)
+#   shape  : "rect" flat plate (default) or "delta" triangular ramp
+#   toe    : "out" splayed LEs (IMP74 default) or "in" converged LEs
+#   pitch_mm: VG-to-VG spacing in mm (None -> IMP74 50 mm); also sets the
+#             periodic slice width so the array stays consistent
+#   count   : "pair" counter-rotating pair per pitch (IMP74 default) or
+#             "single" one fin per pitch alternating yaw (Stolspeed pattern);
+#             single doubles the periodic slice to 2*pitch so the alternation
+#             is captured by the cyclic BCs
+#   beta_deg: vane incidence to the flow (None -> IMP74/Stolspeed 15 deg);
+#             the angle-sweep cases set 5/10/20 to find the best incidence
+def case(name, *, h_mm=None, alpha=18.0, x_frac=None, re=None,
+         shape="rect", toe="out", pitch_mm=None, count="pair", beta_deg=None):
+    return dict(name=name, h_mm=h_mm, alpha=alpha, x_frac=x_frac, re=re,
+                shape=shape, toe=toe, pitch_mm=pitch_mm, count=count,
+                beta_deg=beta_deg)
+
+
 CASE_MATRIX = [
-    ("clean_a08", None, 8.0, None, None, None),
-    ("clean_a18", None, 18.0, None, None, None),
-    ("vg12p50_a18", 12.0, 18.0, None, None, None),
-    ("vg16p50_a18", 16.0, 18.0, None, None, None),
-    ("vg12x15_a18", 12.0, 18.0, 0.15, None, None),
-    ("vg12x30_a18", 12.0, 18.0, 0.30, None, None),
-    ("vg12x45_a18", 12.0, 18.0, 0.45, None, None),
-    ("clean_a02", None, 2.0, None, 5.52e6, None),
-    ("vg12p50_a02", 12.0, 2.0, None, 5.52e6, None),
-    ("clean_a16", None, 16.0, None, None, None),
-    ("vg12p50_a16", 12.0, 16.0, None, None, None),
-    ("vg12d50_a18", 12.0, 18.0, None, None, "delta"),
+    # --- original 7: sanity + alpha-18 placement/height sweep ----------------
+    case("clean_a08", alpha=8.0),
+    case("clean_a18", alpha=18.0),
+    case("vg12p50_a18", h_mm=12.0),
+    case("vg16p50_a18", h_mm=16.0),
+    case("vg12x15_a18", h_mm=12.0, x_frac=0.15),
+    case("vg12x30_a18", h_mm=12.0, x_frac=0.30),
+    case("vg12x45_a18", h_mm=12.0, x_frac=0.45),
+    # --- batch 2: cruise drag tax (200 mph) + stall-onset (16 deg) + delta ---
+    case("clean_a02", alpha=2.0, re=5.52e6),
+    case("vg12p50_a02", h_mm=12.0, alpha=2.0, re=5.52e6),
+    case("clean_a16", alpha=16.0),
+    case("vg12p50_a16", h_mm=12.0, alpha=16.0),
+    case("vg12d50_a18", h_mm=12.0, shape="delta"),
+    # --- batch 3: overnight optima search around the alpha-18 winner ---------
+    # toe-in vs the toe-out winner (direct A/B the user asked for)
+    case("vg12p50i_a18", h_mm=12.0, toe="in"),
+    # delta + toe-in (does the better planform prefer the other toe sense?)
+    case("vg12d50i_a18", h_mm=12.0, shape="delta", toe="in"),
+    # spacing sweep at the winning height/station: tighter and wider pitch
+    case("vg12p35_a18", h_mm=12.0, pitch_mm=35.0),
+    case("vg12p70_a18", h_mm=12.0, pitch_mm=70.0),
+    # height fine-step between the 12 mm winner and the 16 mm spoiler
+    case("vg10p50_a18", h_mm=10.0),
+    # --- batch 4: Stolspeed philosophy vs IMP74 (ref/Smokey__Clear.jpg) ------
+    # JG's two claims to settle on the GPU:
+    #  (1) single alternating fins make ~zero cruise drag where counter-
+    #      rotating pairs make drag -> test single rect at 18deg AND cruise;
+    #  (2) the swept rounded-LE Stolspeed fin makes a tighter, lower-drag
+    #      vortex than a flat plate -> test the stol planform at 18deg.
+    # Stall-recovery head-to-head at the alpha-18 decision point:
+    case("vg12s50_a18", h_mm=12.0, shape="stol"),               # swept fin, pair
+    case("vg12single_a18", h_mm=12.0, count="single"),          # single rect alt
+    case("vg12ssingle_a18", h_mm=12.0, shape="stol", count="single"),  # both
+    # Cruise drag-tax A/B: does single alternating really beat the pair?
+    case("vg12single_a02", h_mm=12.0, alpha=2.0, re=5.52e6, count="single"),
+    case("vg12s50_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="stol"),
+    # --- batch 5: incidence-angle sweep on the DELTA winner @ alpha 18 -------
+    # 15deg is vg12d50_a18 (done). Bracket the effective 10-20 band plus a
+    # shallow 5deg low-end probe to confirm 15 is near-optimal, not just the
+    # inherited default. Best (spacing, angle) falls out of batch3 + this.
+    case("vg12d50b05_a18", h_mm=12.0, shape="delta", beta_deg=5.0),
+    case("vg12d50b10_a18", h_mm=12.0, shape="delta", beta_deg=10.0),
+    case("vg12d50b20_a18", h_mm=12.0, shape="delta", beta_deg=20.0),
 ]
 
 
@@ -159,10 +199,72 @@ def make_delta_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
     return tri
 
 
+def make_stolspeed_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
+    """One Stolspeed-style fin in the same frame as make_vane: base on the
+    z=0..(thin) skin plane, +x downstream, +y up, LE (apex) at the origin.
+
+    Captures the design JG describes in ref/Smokey__Clear.jpg + the Stolspeed
+    "Design" writeup, the features he says matter for a tight low-drag vortex:
+      * a SWEPT, ROUNDED leading edge - the fin rises from near-zero height at
+        the apex to full height h toward the rear along a smooth curve, so the
+        airflow "progressively spills over the leading edge" instead of
+        dumping off a square corner;
+      * a TAPERED top (rounded, not a sharp blade) - the upper edge eases back
+        down past the peak so there is no long flat blade trailing;
+      * a SLIM fin (the same physical thickness as the other vanes for a fair
+        A/B), no close-pair companion (the matrix decides single vs pair).
+
+    Built as a thin extrusion of a 2D fin OUTLINE in the (x,y) plane swept
+    +/- thick/2 in z. The outline is a polyline so the LE/TE curvature is
+    explicit and reproducible; no shapely needed - we triangulate the closed
+    loop as a fan from the base-front apex (the loop is convex enough that a
+    fan is valid, and process=True repairs any sliver).
+    """
+    # Fin outline, fractions of (length, h). x runs 0..1 of length, y 0..1 of
+    # h. Start at the base apex, sweep UP-and-BACK along the rounded LE to the
+    # peak, then DOWN-and-BACK along the tapered top to the base trailing
+    # edge, and close along the base. Peak sits ~70% aft (raked-back fin).
+    n = 14
+    le = np.array([[                              # rounded, swept leading edge
+        0.62 * (1 - math.cos(0.5 * math.pi * s)),   # x: eased back
+        1.00 * math.sin(0.5 * math.pi * s),         # y: rises to the peak
+    ] for s in np.linspace(0.0, 1.0, n)])
+    te = np.array([[                              # tapered top down to base TE
+        0.62 + 0.38 * (s ** 0.7),                   # x: peak(0.62) -> 1.0
+        1.00 * (1.0 - s) ** 1.4,                    # y: peak -> 0, eased
+    ] for s in np.linspace(0.0, 1.0, n)])
+    outline = np.vstack([le, te[1:]])             # (2n-1, 2) open chain
+    outline[:, 0] *= length
+    outline[:, 1] *= h
+
+    # Triangulate the closed loop (outline + base segment back to apex) as a
+    # fan from the first vertex; sweep to a thin 3D prism.
+    m = len(outline)
+    t = thick / 2.0
+    verts = np.vstack([
+        np.column_stack([outline, np.full(m, -t)]),   # z = -t face
+        np.column_stack([outline, np.full(m, +t)]),   # z = +t face
+    ])
+    faces = []
+    for i in range(1, m - 1):                     # the two flat fin caps
+        faces.append([0, i + 1, i])               # -t cap (CW seen from -z)
+        faces.append([m, m + i, m + i + 1])       # +t cap
+    for i in range(m):                            # the thin rim around the fin
+        j = (i + 1) % m
+        faces.append([i, j, m + j])
+        faces.append([i, m + j, m + i])
+    fin = trimesh.Trimesh(vertices=verts, faces=np.array(faces), process=True)
+    fin.fix_normals()
+    return fin
+
+
 def build_article(name: str, h_mm: float | None, alpha_deg: float,
                   ac, coords: np.ndarray, domain_span: float,
                   x_frac_override: float | None = None,
-                  shape: str = "rect") -> tuple[Path, Path | None]:
+                  shape: str = "rect", toe: str = "out",
+                  pitch_override: float | None = None,
+                  count: str = "pair",
+                  beta_deg_override: float | None = None) -> tuple[Path, Path | None]:
     """Build one wall article (wing [+ vane pair]), rotated to alpha.
 
     Returns (wall_stl, vanes_stl-or-None). The vanes-only STL is exported
@@ -171,12 +273,21 @@ def build_article(name: str, h_mm: float | None, alpha_deg: float,
     unambiguous.
     """
     chord = ac.wing.aileron.chord_at_mid_station          # 0.9022 m [DXF]
-    pitch = ac.vg_defaults.wing.spacing_outboard          # 0.050 m  [IMP74]
+    # Pitch (VG-to-VG spacing) is the study default unless a spacing-sweep
+    # case overrides it. NOTE the slice WIDTH stays = domain_span (one pitch
+    # of the periodic array), so a pitch override changes both the vane z
+    # offset AND the extruded slab width via the caller.
+    pitch = pitch_override if pitch_override is not None \
+        else ac.vg_defaults.wing.spacing_outboard         # 0.050 m  [IMP74]
     # Chordwise station of the vane row: study default from IMP74 unless a
     # matrix entry overrides it (the placement-sweep cases).
     x_frac = (x_frac_override if x_frac_override is not None
               else ac.vg_defaults.wing.chord_position_frac)  # 0.07   [IMP74]
-    beta = ac.vg_defaults.vane_incidence                  # 15 deg, radians
+    # Vane incidence to the local flow. Study default 15 deg (IMP74 +
+    # Stolspeed sweet spot); the angle-sweep cases override it to bracket the
+    # effective 10-20 deg band (and a shallow 5 deg low-end probe).
+    beta = (math.radians(beta_deg_override) if beta_deg_override is not None
+            else ac.vg_defaults.vane_incidence)           # radians
     l_per_h = ac.vg_defaults.vane_length_per_height       # 3.0
 
     stl_span = SPAN_OVERHANG * domain_span
@@ -193,18 +304,39 @@ def build_article(name: str, h_mm: float | None, alpha_deg: float,
         y_surf, slope = upper_surface_point(coords, x_frac)
         x_le, y_le = x_frac * chord, y_surf * chord
 
-        # One toe-out pair centered on the slice: vanes at z = +/- pitch/4,
-        # incidence +/- beta, laid flush on the local skin slope and sunk
-        # 0.1h so the union has guaranteed overlap. Planform per the matrix:
-        # rectangular plate (study default) or triangular delta ramp.
-        vane_builder = make_delta_vane if shape == "delta" else make_vane
-        for sgn in (+1.0, -1.0):
+        # Planform builder per the matrix: rectangular plate (study default),
+        # triangular delta ramp, or the Stolspeed swept-LE fin.
+        vane_builder = {
+            "delta": make_delta_vane,
+            "stol": make_stolspeed_vane,
+        }.get(shape, make_vane)
+        # Toe sense: "out" splays the leading edges apart (each vane yawed so
+        # its LE points away from the slice center - the IMP74 default);
+        # "in" converges them. The yaw sign is toe_sign * (per-vane sign).
+        toe_sign = -1.0 if toe == "in" else +1.0
+
+        # Vane LAYOUT:
+        #  - "pair"   : a counter-rotating pair in ONE pitch (IMP74). The slice
+        #               is one pitch wide; vanes sit at z = +/- pitch/4, yawed
+        #               +/-beta. This is the study baseline.
+        #  - "single" : the Stolspeed "single alternating" pattern. One fin per
+        #               pitch, the NEXT pitch's fin yawed the OTHER way. To make
+        #               that alternation periodic the slice must span TWO
+        #               pitches with two opposite-yawed fins (the caller widens
+        #               the slab to 2*pitch for these cases).
+        if count == "single":
+            # Two fins, one per pitch, opposite yaw, centered in each pitch.
+            placements = [(+1.0, -pitch / 2.0), (-1.0, +pitch / 2.0)]
+        else:
+            placements = [(+1.0, +pitch / 4.0), (-1.0, -pitch / 4.0)]
+
+        for sgn, z_off in placements:
             v = vane_builder(h, vane_l, vane_t)
             v.apply_transform(trimesh.transformations.rotation_matrix(
-                sgn * beta, (0.0, 1.0, 0.0)))
+                toe_sign * sgn * beta, (0.0, 1.0, 0.0)))
             v.apply_transform(trimesh.transformations.rotation_matrix(
                 slope, (0.0, 0.0, 1.0)))
-            v.apply_translation((x_le, y_le - 0.10 * h, sgn * pitch / 4.0))
+            v.apply_translation((x_le, y_le - 0.10 * h, z_off))
             vanes.append(v)
 
         wall = trimesh.boolean.union([wing] + vanes)
@@ -969,40 +1101,53 @@ def main() -> None:
 
     ac = load_aircraft(REPO / "aircraft.yaml")
     chord = ac.wing.aileron.chord_at_mid_station
-    pitch = ac.vg_defaults.wing.spacing_outboard
+    default_pitch = ac.vg_defaults.wing.spacing_outboard
 
-    print(f"[build] chord={chord:.4f} m  pitch={pitch * 1000:.0f} mm  "
+    print(f"[build] chord={chord:.4f} m  pitch={default_pitch * 1000:.0f} mm  "
           f"(study Re {RE:.2g} -> U={RE * NU / chord:.2f} m/s)")
 
     coords = resample_airfoil(load_airfoil(REPO / "geometry" / "ls413.dat"),
                               n_points=241, te="blunt")
 
     selected = [row for row in CASE_MATRIX
-                if not opts.only or row[0] in opts.only]
+                if not opts.only or row["name"] in opts.only]
     if opts.only:
-        missing = set(opts.only) - {row[0] for row in selected}
+        missing = set(opts.only) - {row["name"] for row in selected}
         if missing:
             raise SystemExit(f"[build] not in CASE_MATRIX: {sorted(missing)}")
 
-    # Each row carries its own (Re, shape); Re None falls back to the study
-    # default 2.2e6 and shape None to the rectangular plate. The freestream
-    # speed is recomputed per case so the cruise pair (Re 5.52e6) and the
-    # stall cases share one geometry pipeline but different magUInf/BCs.
-    for name, h_mm, alpha, x_frac, re_case, shape in selected:
-        re_eff = re_case if re_case is not None else RE
+    # Each row carries its own knobs; None fields fall back to study defaults.
+    # The freestream speed is recomputed per case so the cruise pair
+    # (Re 5.52e6) and the stall cases share one geometry pipeline but
+    # different magUInf/BCs. Pitch overrides change BOTH the periodic slice
+    # width (domain_span) and the vane z-offset so the array stays periodic.
+    for row in selected:
+        re_eff = row["re"] if row["re"] is not None else RE
         u_inf = re_eff * NU / chord
-        print(f"[build] {name}: alpha={alpha:g}deg  Re={re_eff:.2g}  "
-              f"U={u_inf:.2f} m/s  shape={shape or 'rect'}")
-        wall, vanes = build_article(name, h_mm, alpha, ac, coords, pitch,
-                                    x_frac_override=x_frac,
-                                    shape=shape or "rect")
-        write_case(name, wall, vanes, u_inf, chord, pitch, n_iter=4000)
+        pitch = (row["pitch_mm"] / 1000.0 if row["pitch_mm"] is not None
+                 else default_pitch)
+        # "single" alternating fins need a 2-pitch periodic cell so the cyclic
+        # BCs see one fin yawed each way; the mesh slab + cyclic spacing use
+        # this slab width while the vanes are still placed on the true pitch.
+        slab = 2.0 * pitch if row["count"] == "single" else pitch
+        beta_txt = f"{row['beta_deg']:g}" if row["beta_deg"] is not None else "15"
+        print(f"[build] {row['name']}: alpha={row['alpha']:g}deg  "
+              f"Re={re_eff:.2g}  U={u_inf:.2f} m/s  pitch={pitch*1000:.0f}mm  "
+              f"slab={slab*1000:.0f}mm  shape={row['shape']}  "
+              f"toe={row['toe']}  count={row['count']}  beta={beta_txt}deg")
+        wall, vanes = build_article(row["name"], row["h_mm"], row["alpha"],
+                                    ac, coords, slab,
+                                    x_frac_override=row["x_frac"],
+                                    shape=row["shape"], toe=row["toe"],
+                                    pitch_override=pitch, count=row["count"],
+                                    beta_deg_override=row["beta_deg"])
+        write_case(row["name"], wall, vanes, u_inf, chord, slab, n_iter=4000)
 
     runner = HERE / "run_all.sh"
     runner.write_text(RUNNER, newline="\n")
     print(f"[build] runner: {runner}")
     print("[build] WSL:  bash gpu/rapidcfd/run_all.sh " +
-          " ".join(row[0] for row in selected))
+          " ".join(row["name"] for row in selected))
 
 
 if __name__ == "__main__":
