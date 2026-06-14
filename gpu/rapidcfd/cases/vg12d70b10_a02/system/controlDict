@@ -1,0 +1,61 @@
+/*--------------------------------*- C++ -*----------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+application     simpleFoam;
+
+startFrom       latestTime;
+startTime       0;
+stopAt          endTime;
+endTime         4000;
+deltaT          1;
+
+writeControl    timeStep;
+writeInterval   1000;
+purgeWrite      2;
+
+writeFormat     ascii;
+writePrecision  7;
+writeCompression off;
+
+timeFormat      general;
+timePrecision   6;
+
+runTimeModifiable false;
+
+functions
+{
+    forceCoeffs1
+    {
+        // 2.3-era function-object syntax (RapidCFD vintage). Geometry is
+        // rotated to alpha, freestream is +x, so lift/drag axes are fixed.
+        type            forceCoeffs;
+        functionObjectLibs ("libforces.so");
+        outputControl   timeStep;
+        outputInterval  25;
+
+        patches         (wing);
+        pName           p;
+        UName           U;
+        rhoName         rhoInf;
+        rhoInf          1.0;        // kinematic pressure -> rho = 1
+        log             true;
+
+        CofR            (0.225552 0 0);
+        liftDir         (0 1 0);
+        dragDir         (1 0 0);
+        pitchAxis       (0 0 1);
+
+        magUInf         90.5512;
+        lRef            0.9022;
+        Aref            0.063155;  // chord x one-pitch span
+    }
+}

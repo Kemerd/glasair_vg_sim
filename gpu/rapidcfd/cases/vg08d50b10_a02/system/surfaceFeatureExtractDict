@@ -1,0 +1,25 @@
+/*--------------------------------*- C++ -*----------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      surfaceFeatureExtractDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+wing.stl
+{
+    extractionMethod    extractFromSurface;
+
+    extractFromSurfaceCoeffs
+    {
+        // 150 deg keeps the blunt TE corners and vane plate edges while
+        // ignoring the gentle skin curvature.
+        includedAngle   150;
+    }
+
+    writeObj            no;
+}

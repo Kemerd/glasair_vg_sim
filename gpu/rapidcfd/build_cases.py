@@ -144,6 +144,58 @@ CASE_MATRIX = [
     case("vg12d50b05_a18", h_mm=12.0, shape="delta", beta_deg=5.0),
     case("vg12d50b10_a18", h_mm=12.0, shape="delta", beta_deg=10.0),
     case("vg12d50b20_a18", h_mm=12.0, shape="delta", beta_deg=20.0),
+    # --- batch 6: converge on the delta@beta10 optimum + the CRUISE TAX ------
+    # Leaders so far: delta beta10 (best Cd) and stol fin (best Cl, steady);
+    # wider pitch (70mm) and shallower beta both helped. This wave nails the
+    # 2D optimum (pitch x beta) on the delta AND measures the cruise tax of
+    # every stall contender so we can rank by stall-win-per-cruise-cost.
+    # Pitch on the delta@beta10 (70mm was great for rect - is delta same?):
+    case("vg12d70b10_a18", h_mm=12.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg12d60b10_a18", h_mm=12.0, shape="delta", beta_deg=10.0, pitch_mm=60.0),
+    # Even shallower / mid incidence on the delta to find the beta minimum:
+    case("vg12d50b08_a18", h_mm=12.0, shape="delta", beta_deg=8.0),
+    case("vg12d50b12_a18", h_mm=12.0, shape="delta", beta_deg=12.0),
+    # CRUISE TAX of the stall leaders (alpha=2, Re5.52e6) - the tradeoff axis:
+    case("vg12d50b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="delta", beta_deg=10.0),
+    case("vg12d70b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg12ssingle_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="stol", count="single"),
+    # --- batch 7: SHORT micro-VG (the cruise-friendly bet from research) -----
+    # Lin's insight: a VG ~0.2-0.5x BL height recovers separation for a
+    # FRACTION of the cruise drag. Our BL ~3-6mm at 9%c, so 6-8mm delta sits
+    # mostly inside the stall BL but barely pokes the thin cruise BL = stall
+    # win for near-zero cruise cost. Test 6/8mm delta@beta10 at BOTH alphas.
+    case("vg06d50b10_a18", h_mm=6.0, shape="delta", beta_deg=10.0),
+    case("vg08d50b10_a18", h_mm=8.0, shape="delta", beta_deg=10.0),
+    case("vg08d50b10_a02", h_mm=8.0, alpha=2.0, re=5.52e6, shape="delta", beta_deg=10.0),
+    # --- batch 8 (Wave E): "crazy" emerging-research planforms ---------------
+    # From the 2026-06-14 design research (see vg-research-emerging-designs):
+    #  - TRAPEZOID (cropped delta, l=4h): the ICAS-2020 / V-22 convergence
+    #    shape, claims best vortex persistence; our top stall hope.
+    #  - GOTHIC (concave swept LE): highest Clmax in lit BUT only <14deg AoA -
+    #    we are at 18, so this is a "verify, don't assume" probe.
+    # Run each at the current-best settings (beta10, 50mm) at stall, plus the
+    # trapezoid cruise tax since it is the leading stall candidate.
+    case("vg12t50b10_a18", h_mm=12.0, shape="trap", beta_deg=10.0),
+    case("vg12g50b10_a18", h_mm=12.0, shape="gothic", beta_deg=10.0),
+    case("vg12t50b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="trap", beta_deg=10.0),
+    # Trapezoid at the winning wide pitch too (70mm helped every other shape):
+    case("vg12t70b10_a18", h_mm=12.0, shape="trap", beta_deg=10.0, pitch_mm=70.0),
+    # --- batch 9 (Wave E cont.): AIRFOIL-SECTION cambered vane ---------------
+    # Best cruise-vs-stall planform on paper: cambered section = stronger
+    # vortex per height at LOWER device drag (no sharp-edge self-separation).
+    # Test at stall and cruise; if it holds the delta's stall win at a smaller
+    # cruise tax, this is the cruise-friendly champion.
+    case("vg12a50b10_a18", h_mm=12.0, shape="airfoil", beta_deg=10.0),
+    case("vg12a50b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="airfoil", beta_deg=10.0),
+    # --- batch 10 (Wave G): BEST-OF-BOTH combos ------------------------------
+    # The data points to single-alternating (cuts cruise tax to +34%) + beta10
+    # (best stall) + wide pitch (70mm) as the untested optimum. Test it on the
+    # two best shapes (delta, swept) at BOTH alphas to find the config that
+    # recovers stall for the smallest cruise cost. Single-alt -> 2-pitch slab.
+    case("vg12dsingle70b10_a18", h_mm=12.0, shape="delta", count="single", beta_deg=10.0, pitch_mm=70.0),
+    case("vg12dsingle70b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="delta", count="single", beta_deg=10.0, pitch_mm=70.0),
+    case("vg12ssingle70b10_a18", h_mm=12.0, shape="stol", count="single", beta_deg=10.0, pitch_mm=70.0),
+    case("vg12ssingle70b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="stol", count="single", beta_deg=10.0, pitch_mm=70.0),
 ]
 
 
@@ -258,6 +310,132 @@ def make_stolspeed_vane(h: float, length: float, thick: float) -> trimesh.Trimes
     return fin
 
 
+def _extrude_outline(outline: np.ndarray, thick: float) -> trimesh.Trimesh:
+    """Thin-prism extrusion of a 2D (x,y) vane OUTLINE swept +/- thick/2 in z.
+
+    Shared by the curved-planform builders (trapezoid, gothic, ...). `outline`
+    is an open vertex chain in the (x,y) plane already scaled to meters; the
+    closing base segment (last vertex back to the first) is implied. The two
+    flat caps are fanned from vertex 0 and the rim is stitched as quads. Any
+    sliver from the fan on a mildly non-convex loop is repaired by process=True.
+    """
+    m = len(outline)
+    t = thick / 2.0
+    verts = np.vstack([
+        np.column_stack([outline, np.full(m, -t)]),
+        np.column_stack([outline, np.full(m, +t)]),
+    ])
+    faces = []
+    for i in range(1, m - 1):                     # the two flat caps
+        faces.append([0, i + 1, i])
+        faces.append([m, m + i, m + i + 1])
+    for i in range(m):                            # the thin rim
+        j = (i + 1) % m
+        faces.append([i, j, m + j])
+        faces.append([i, m + j, m + i])
+    mesh = trimesh.Trimesh(vertices=verts, faces=np.array(faces), process=True)
+    mesh.fix_normals()
+    return mesh
+
+
+def make_trapezoid_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
+    """One TRAPEZOIDAL (cropped-delta) vane in the make_vane frame.
+
+    The geometry two studies closest to our setup converge on (ICAS 2020,
+    fixed-wing V-22): a delta with the apex cropped flat, so the vane has a
+    short raked LE rising to full height, a flat top, and a vertical TE. The
+    flat top sustains the streamwise vortex farther downstream than a sharp
+    triangle (~+10% vortex persistence in the literature). LE crop sits at
+    ~25% of length; top runs flat from there to the TE.
+    """
+    crop = 0.25                                   # apex cropped at 25% length
+    outline = np.array([
+        [0.0, 0.0],                               # base LE (on the skin)
+        [crop * length, h],                       # raked LE up to full height
+        [length, h],                              # flat top to the TE
+        [length, 0.0],                            # vertical trailing edge
+    ])
+    return _extrude_outline(outline, thick)
+
+
+def make_gothic_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
+    """One GOTHIC-planform vane in the make_vane frame.
+
+    A rectangle whose leading edge is swept back along a CONCAVE (gothic) arc
+    that blends into a vertical trailing edge - area between a triangle and a
+    rectangle. The curved swept LE sheds a tighter, more concentrated vortex
+    that resists bursting better than a square LE. Built from a sampled arc:
+    the LE rises from the base apex to full height following y = (s)^p with
+    p<1 (concave-up, gothic), then a flat top and vertical TE.
+    """
+    n = 12
+    p = 0.55                                       # <1 => concave gothic sweep
+    le = np.array([[                               # swept concave leading edge
+        0.45 * (s ** 1.6) * length,                # x: eases back, bulk near top
+        (s ** p) * h,                              # y: rises gothic to full h
+    ] for s in np.linspace(0.0, 1.0, n)])
+    outline = np.vstack([
+        le,
+        [[length, h], [length, 0.0]],              # flat top, vertical TE
+    ])
+    return _extrude_outline(outline, thick)
+
+
+def make_airfoil_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
+    """One AIRFOIL-SECTION vane: a rectangular planform (length x h) whose
+    CROSS-SECTION in the chordwise(x)-thickness(z) plane is a cambered airfoil
+    instead of a flat plate. Same make_vane frame: base at y=0 on the skin,
+    +x downstream, +y up; the section's chord runs along +x, camber bows in z.
+
+    Research (DTU/KTH) shows a cambered-section vane makes a STRONGER downstream
+    vortex than a flat plate of equal height while shedding LESS device drag
+    (no sharp-edge self-separation) - the best cruise-vs-stall planform on
+    paper. Modeled with a NACA-4-digit-style camber line + thickness so the
+    incidence applied later (beta) sets the section's angle to the local flow.
+
+    Built by lofting the same 2D airfoil section at y=0 and y=h (constant
+    section, rectangular planform) and stitching the two loops into a solid.
+    """
+    # NACA-4-style section: max camber m at position pcm, thickness tc, all as
+    # fractions of the section chord (= length). Modest camber for a vane.
+    m, pcm, tc = 0.04, 0.40, max(0.12, thick / length)
+    n = 18
+    xc = (1 - np.cos(np.linspace(0.0, math.pi, n))) / 2.0   # cosine-clustered
+
+    # Mean camber line z_c and its slope (NACA 4-digit piecewise).
+    zc = np.where(xc < pcm,
+                  m / pcm**2 * (2 * pcm * xc - xc**2),
+                  m / (1 - pcm)**2 * ((1 - 2 * pcm) + 2 * pcm * xc - xc**2))
+    # Half-thickness distribution (NACA 4-digit).
+    yt = 5 * tc * (0.2969 * np.sqrt(xc) - 0.1260 * xc - 0.3516 * xc**2
+                   + 0.2843 * xc**3 - 0.1015 * xc**4)
+    upper = np.column_stack([xc, zc + yt])          # (x, z) upper surface
+    lower = np.column_stack([xc, zc - yt])          # (x, z) lower surface
+    # Closed section loop: upper LE->TE then lower TE->LE. At the LE (xc=0) and
+    # TE (xc=1) the two surfaces meet, so drop the duplicate endpoints from the
+    # lower run or the loop has degenerate zero-length edges (breaks the solid).
+    sect = np.vstack([upper, lower[::-1][1:-1]])
+    sect[:, 0] *= length                            # scale x to vane length
+    sect[:, 1] *= length                            # scale z by length too
+
+    k = len(sect)
+    # Two copies of the section at y=0 (root, on the skin) and y=h (tip).
+    root = np.column_stack([sect[:, 0], np.zeros(k), sect[:, 1]])
+    tip = np.column_stack([sect[:, 0], np.full(k, h), sect[:, 1]])
+    verts = np.vstack([root, tip])
+    faces = []
+    for i in range(k):                              # side wall (root->tip loft)
+        j = (i + 1) % k
+        faces.append([i, j, k + j])
+        faces.append([i, k + j, k + i])
+    for i in range(1, k - 1):                       # root cap and tip cap
+        faces.append([0, i, i + 1])
+        faces.append([k, k + i + 1, k + i])
+    vane = trimesh.Trimesh(vertices=verts, faces=np.array(faces), process=True)
+    vane.fix_normals()
+    return vane
+
+
 def build_article(name: str, h_mm: float | None, alpha_deg: float,
                   ac, coords: np.ndarray, domain_span: float,
                   x_frac_override: float | None = None,
@@ -299,16 +477,22 @@ def build_article(name: str, h_mm: float | None, alpha_deg: float,
     vanes: list[trimesh.Trimesh] = []
     if h_mm is not None:
         h = h_mm / 1000.0
-        vane_l = l_per_h * h
+        # Trapezoidal vanes use the research-recommended l=4h (longer flat top
+        # sustains the vortex); all other planforms use the IMP74 l=3h default.
+        vane_l = (4.0 if shape == "trap" else l_per_h) * h
         vane_t = max(0.0015, h / 8.0)                     # physical plate
         y_surf, slope = upper_surface_point(coords, x_frac)
         x_le, y_le = x_frac * chord, y_surf * chord
 
         # Planform builder per the matrix: rectangular plate (study default),
-        # triangular delta ramp, or the Stolspeed swept-LE fin.
+        # triangular delta ramp, Stolspeed swept-LE fin, trapezoid (cropped
+        # delta, the ICAS/V-22 convergence shape), or gothic (concave swept LE).
         vane_builder = {
             "delta": make_delta_vane,
             "stol": make_stolspeed_vane,
+            "trap": make_trapezoid_vane,
+            "gothic": make_gothic_vane,
+            "airfoil": make_airfoil_vane,
         }.get(shape, make_vane)
         # Toe sense: "out" splays the leading edges apart (each vane yawed so
         # its LE points away from the slice center - the IMP74 default);
