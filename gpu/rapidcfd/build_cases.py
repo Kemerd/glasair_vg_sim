@@ -167,6 +167,13 @@ CASE_MATRIX = [
     case("vg06d50b10_a18", h_mm=6.0, shape="delta", beta_deg=10.0),
     case("vg08d50b10_a18", h_mm=8.0, shape="delta", beta_deg=10.0),
     case("vg08d50b10_a02", h_mm=8.0, alpha=2.0, re=5.52e6, shape="delta", beta_deg=10.0),
+    # 6mm cruise tax - added 2026-06-14 after the 6mm RECOVERED stall (Cd
+    # -77.7%): if its cruise tax beats the 12mm champion's +19.8%, the 6mm
+    # micro-delta becomes the cruise-friendly champion (short vane hides in
+    # the thin cruise BL). At 70mm pitch too for the best-cruise combo.
+    case("vg06d50b10_a02", h_mm=6.0, alpha=2.0, re=5.52e6, shape="delta", beta_deg=10.0),
+    case("vg06d70b10_a18", h_mm=6.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg06d70b10_a02", h_mm=6.0, alpha=2.0, re=5.52e6, shape="delta", beta_deg=10.0, pitch_mm=70.0),
     # --- batch 8 (Wave E): "crazy" emerging-research planforms ---------------
     # From the 2026-06-14 design research (see vg-research-emerging-designs):
     #  - TRAPEZOID (cropped delta, l=4h): the ICAS-2020 / V-22 convergence
@@ -196,6 +203,22 @@ CASE_MATRIX = [
     case("vg12dsingle70b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="delta", count="single", beta_deg=10.0, pitch_mm=70.0),
     case("vg12ssingle70b10_a18", h_mm=12.0, shape="stol", count="single", beta_deg=10.0, pitch_mm=70.0),
     case("vg12ssingle70b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="stol", count="single", beta_deg=10.0, pitch_mm=70.0),
+    # --- batch 11 (Wave H): PROGRESSIVE SPANWISE STALL - inboard zone --------
+    # User wants the swept Glasair wing tuned per region: ROOT/inboard should
+    # stall FIRST (safety - ailerons stay effective, nose drops cleanly), the
+    # OUTBOARD over the ailerons keeps attachment+control longest. The lever is
+    # SPACING: coarser pitch inboard = weaker VGs = root lets go first. The
+    # outboard champion is delta@b10@70mm; test a deliberately WIDE 90mm and a
+    # VERY wide 110mm inboard variant of the same vane to find a spacing that
+    # still helps a bit but stalls earlier than the 70mm outboard - run at the
+    # stall-onset alpha=16 (where the outboard champion should still hold but
+    # the wider inboard should start letting go) AND alpha=18.
+    case("vg12d90b10_a16", h_mm=12.0, alpha=16.0, shape="delta", beta_deg=10.0, pitch_mm=90.0),
+    case("vg12d90b10_a18", h_mm=12.0, shape="delta", beta_deg=10.0, pitch_mm=90.0),
+    case("vg12d110b10_a16", h_mm=12.0, alpha=16.0, shape="delta", beta_deg=10.0, pitch_mm=110.0),
+    # And the OUTBOARD champion at alpha=16 (stall-onset) to prove it still
+    # holds where the wide inboard is starting to give up - the progression:
+    case("vg12d70b10_a16", h_mm=12.0, alpha=16.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
 ]
 
 

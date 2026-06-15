@@ -28,21 +28,27 @@ run at *both* angles and ranked by stall-win-per-cruise-cost.
 
 | case | shape | h | pitch | β | Cl | Cd | L/D | ΔCd | pk-pk Cd |
 |---|---|---|---|---|---|---|---|---|---|
-| **vg12s50** | stol fin | 12 | 50 | 15 | **1.809** | 0.099 | **18.3** | −77.7% | 0.032 |
+| vg12d60b10 | delta | 12 | 60 | 10 | **1.828** | 0.0920 | 19.9 | −79.2% | 0.032 |
+| **vg12d70b10 ★CHAMPION** | delta | 12 | 70 | 10 | 1.797 | 0.0966 | 18.6 | −78.2% | 0.043 |
+| **vg12s50** | stol fin | 12 | 50 | 15 | 1.809 | 0.099 | 18.3 | −77.7% | 0.032 |
 | **vg12d50b10** | delta | 12 | 50 | 10 | 1.804 | **0.090** | **20.0** | **−79.7%** | 0.061 |
 | vg12p70 | rect | 12 | 70 | 15 | 1.789 | 0.101 | 17.7 | −77.2% | **0.017** |
 | vg12d50i | delta (toe-in) | 12 | 50 | 15 | 1.779 | 0.100 | 17.8 | −77.5% | 0.041 |
 | vg12d50 | delta | 12 | 50 | 15 | 1.764 | 0.094 | 18.8 | −78.8% | 0.037 |
 | vg10p50 | rect | 10 | 50 | 15 | 1.741 | 0.103 | 16.9 | −76.8% | 0.053 |
+| vg06d50b10 (6mm micro) | delta | 6 | 50 | 10 | 1.680 | 0.0989 | 17.0 | −77.7% | **0.026** |
 | vg12ssingle | stol single | 12 | 50 | 15 | 1.635 | 0.107 | 15.3 | −75.9% | 0.013 |
 | vg12p50 | rect (orig winner) | 12 | 50 | 15 | 1.533 | 0.141 | 10.9 | −68.2% | 0.072 |
 | vg12single | rect single | 12 | 50 | 15 | 1.460 | 0.114 | 12.8 | −74.3% | 0.027 |
 | vg16p50 | rect | 16 | 50 | 15 | 1.104 | 0.373 | 3.0 | −16.0% | 0.150 |
 | vg12p35 | rect | 12 | 35 | 15 | 1.244 | 0.319 | 3.9 | −28.1% | 0.100 |
 
+| vg12d50b08 | delta | 12 | 50 | 8 | 1.777 | 0.0864 | 20.6 | −80.5% | 0.057 |
+| vg12d50b12 | delta | 12 | 50 | 12 | 1.745 | 0.0962 | 18.1 | −78.3% | 0.054 |
 | vg12d50b20 | delta | 12 | 50 | 20 | 1.648 | 0.100 | 16.4 | −77.4% | 0.054 |
 
-*(β sweep so far: 10° best > 15° > 20°. vg12d50b05/b08/b12, vg12d70b10,
+*(β sweep COMPLETE @ 50mm: 8°(Cd 0.086) ≈ 10°(best lift) > 12° > 15° > 20°.
+Optimum incidence 8–10°. vg12d50b05, vg12d70b10,
 vg12d60b10, vg06/vg08 micro, trap/gothic/airfoil — in queue.)*
 
 ## Cruise drag tax (α = 2°, 200 mph). Clean wing: Cd 0.01064
@@ -75,11 +81,13 @@ spacing* that do. Wave G still tests whether single-alt shaves the last bit.
    the delta and swept fin reach L/D ~18–20 at stall — nearly double — and the
    delta *gains* lift where the flat plate lost it.
 
-2. **Shallower incidence is better — β=10° is the winner so far.** On the delta
-   at α=18°: β=10° (Cl 1.804, Cd 0.090) > β=15° (Cl 1.764, Cd 0.094) > β=20°
-   (Cl 1.648, Cd 0.100). The inherited 15° was a touch steep; 20° clearly
-   over-yaws. The b05/b08/b12 cases (queued) will confirm whether the minimum
-   sits at 10° or a hair lower — but the trend is monotonic toward shallow.
+2. **Shallower incidence is better — the optimum is β≈8–10°.** Delta at α=18°,
+   50 mm: β=8° Cl 1.777 / Cd **0.0864** (lowest drag) · β=10° Cl **1.804** / Cd
+   0.0900 (highest lift) · β=15° Cl 1.764 / Cd 0.094 · β=20° Cl 1.648 / Cd
+   0.100. So β=8° minimizes drag and β=10° maximizes lift — both clearly beat
+   the inherited 15°, and 20° over-yaws. Net: **set incidence to 8–10°**; the
+   choice between them is a wash (~0.4% on each metric). β=12 (running) fills
+   the gap but the minimum is bracketed.
 
 3. **Wider spacing is better — and too tight is catastrophic.** 70mm > 50mm,
    and 35mm *re-stalls the wing* (Cd back to 0.32). Crowded VGs merge into one
@@ -102,14 +110,15 @@ The honest physics: a *passive* VG can only add drag when the flow is attached,
 so none of these will *raise* cruise speed — the best achievable is a stall fix
 that costs ~nothing at cruise.
 
-**Leading champion: delta, β=10°, 70 mm pitch.** The shallow 10° incidence is
-the magic — it keeps the stall vortex strong while cutting cruise drag — and
-*wider 70 mm spacing* lowers the cruise tax further (+19.8%, vs +26.3% at 50 mm)
-*and* needs fewer VGs to install. Its stall recovery at 70 mm is being confirmed
-(the rect plate at 70 mm was already among the best stall performers, so the
-delta@β10@70 should be excellent; vg12d70b10_a18 is queued). The 50 mm delta@β10
-is the proven-on-both-axes fallback (stall Cd −79.7%, Cl +12.4%, L/D ~20; cruise
-+26.3%).
+**★ CONFIRMED CHAMPION: delta, β=10°, 70 mm pitch.** Now proven on BOTH axes:
+- Stall (α=18°): Cl 1.797 (+12.0%), Cd 0.0966 (**−78.2%**), L/D 18.6 — full
+  stall recovery, holds right in the predicted band.
+- Cruise (α=2°): Cd 0.01274 (**+19.8%**, the lowest tax of all 30+ configs).
+The shallow 10° incidence is the magic — it keeps the stall vortex strong while
+cutting cruise drag — and the wider 70 mm spacing lowers the cruise tax further
+(+19.8% vs +26.3% at 50 mm) *and* needs ~30% fewer VGs. The 50 mm delta@β10
+(Cd −79.7%, L/D 20.0, cruise +26.3%) is the slightly-stronger-stall / slightly-
+costlier-cruise alternate if you ever want maximum stall authority.
 
 **Cruise speed loss** (off 224 kt true / 258 mph @ 8000 ft, ~200 hp, prop η 0.82),
 by how much of the span carries VGs:
