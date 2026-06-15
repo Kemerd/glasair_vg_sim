@@ -43,6 +43,8 @@ run at *both* angles and ranked by stall-win-per-cruise-cost.
 | vg06d50b10 (6mm micro) | delta | 6 | 50 | 10 | 1.680 | 0.0989 | 17.0 | −77.7% | **0.026** |
 | vg12ssingle | stol single | 12 | 50 | 15 | 1.635 | 0.107 | 15.3 | −75.9% | 0.013 |
 | vg12p50 | rect (orig winner) | 12 | 50 | 15 | 1.533 | 0.141 | 10.9 | −68.2% | 0.072 |
+| vg12dsingle70b10 (delta single-alt) | delta | 12 | 70 | 10 | 1.600 | 0.1175 | 13.6 | −73.5% | 0.020 |
+| vg12ssingle70b10 (swept single-alt) | stol | 12 | 70 | 10 | 1.478 | 0.1342 | 11.0 | −69.7% | 0.047 |
 | vg12single | rect single | 12 | 50 | 15 | 1.460 | 0.114 | 12.8 | −74.3% | 0.027 |
 | vg16p50 | rect | 16 | 50 | 15 | 1.104 | 0.373 | 3.0 | −16.0% | 0.150 |
 | vg12a50b10 (airfoil-section) | airfoil | 12 | 50 | 10 | 1.285 | 0.1745 | 7.4 | −60.6% | 0.539 |
@@ -61,6 +63,8 @@ vg12d60b10, vg06/vg08 micro, trap/gothic/airfoil — in queue.)*
 | case | shape | h | pitch | Cd | Δ vs clean |
 |---|---|---|---|---|---|
 | clean_a02 | — | — | — | 0.01064 | — |
+| vg12dsingle70b10_a02 | delta single-alt | 12 | 70 | 0.01217 | +14.4% (moot — weak stall) |
+| vg12ssingle70b10_a02 | swept single-alt | 12 | 70 | 0.01220 | +14.7% (moot — weak stall) |
 | **vg08d50b10_a02 ★** | delta | 8 | 50 | 0.01232 | **+15.8%** |
 | vg12d70b10_a02 | delta | 12 | 70 | 0.01274 | +19.8% |
 | vg12ssingle_a02 | stol | 12 | 50 | 0.01336 | +25.6% |

@@ -1,0 +1,46 @@
+/*--------------------------------*- C++ -*----------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      createPatchDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+// Post-snappy conversion of the side planes into a translational cyclic
+// pair (see blockMeshDict header for why they are meshed as plain patches).
+pointSync false;
+
+patches
+(
+    {
+        name sideL;
+        patchInfo
+        {
+            type            cyclicAMI;
+            neighbourPatch  sideR;
+            transform       translational;
+            separationVector (0 0 0.05);
+            matchTolerance  1e-3;
+        }
+        constructFrom patches;
+        patches (sideLeft);
+    }
+
+    {
+        name sideR;
+        patchInfo
+        {
+            type            cyclicAMI;
+            neighbourPatch  sideL;
+            transform       translational;
+            separationVector (0 0 -0.05);
+            matchTolerance  1e-3;
+        }
+        constructFrom patches;
+        patches (sideRight);
+    }
+);

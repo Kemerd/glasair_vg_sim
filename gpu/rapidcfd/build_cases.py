@@ -58,6 +58,9 @@ if str(REPO) not in sys.path:
 
 import numpy as np
 import trimesh
+# shapely ships with trimesh; used by _extrude_outline for robust cap
+# triangulation of curved vane planforms (parabolic, ogive, gothic, ...).
+from shapely.geometry import Polygon as ShapelyPolygon
 
 from geometry.airfoil import load_airfoil, resample_airfoil
 from geometry.stl_gen import extrude_section
@@ -203,6 +206,17 @@ CASE_MATRIX = [
     case("vg12dsingle70b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="delta", count="single", beta_deg=10.0, pitch_mm=70.0),
     case("vg12ssingle70b10_a18", h_mm=12.0, shape="stol", count="single", beta_deg=10.0, pitch_mm=70.0),
     case("vg12ssingle70b10_a02", h_mm=12.0, alpha=2.0, re=5.52e6, shape="stol", count="single", beta_deg=10.0, pitch_mm=70.0),
+    # --- batch 12 (Wave J): PARABOLIC + OGIVE planforms vs the delta champion -
+    # User asked 2026-06-15: we A/B'd delta vs rect/trap/gothic but never the
+    # nose-cone curves. Test parabolic (convex, fuller LE) and tangent-ogive
+    # (fuller still, sharp apex) at the WINNING size/settings (8mm, beta10,
+    # 50mm) so it's apples-to-apples with the 8mm delta champion - stall AND
+    # cruise. Also gothic at 8mm (only had it at 12mm) for a fair same-size set.
+    case("vg08pb50b10_a18", h_mm=8.0, shape="parabolic", beta_deg=10.0),
+    case("vg08pb50b10_a02", h_mm=8.0, alpha=2.0, re=5.52e6, shape="parabolic", beta_deg=10.0),
+    case("vg08og50b10_a18", h_mm=8.0, shape="ogive", beta_deg=10.0),
+    case("vg08og50b10_a02", h_mm=8.0, alpha=2.0, re=5.52e6, shape="ogive", beta_deg=10.0),
+    case("vg08g50b10_a18", h_mm=8.0, shape="gothic", beta_deg=10.0),
     # --- batch 11 (Wave H): PROGRESSIVE SPANWISE STALL - inboard zone --------
     # User wants the swept Glasair wing tuned per region: ROOT/inboard should
     # stall FIRST (safety - ailerons stay effective, nose drops cleanly), the
@@ -336,27 +350,33 @@ def make_stolspeed_vane(h: float, length: float, thick: float) -> trimesh.Trimes
 def _extrude_outline(outline: np.ndarray, thick: float) -> trimesh.Trimesh:
     """Thin-prism extrusion of a 2D (x,y) vane OUTLINE swept +/- thick/2 in z.
 
-    Shared by the curved-planform builders (trapezoid, gothic, ...). `outline`
-    is an open vertex chain in the (x,y) plane already scaled to meters; the
-    closing base segment (last vertex back to the first) is implied. The two
-    flat caps are fanned from vertex 0 and the rim is stitched as quads. Any
-    sliver from the fan on a mildly non-convex loop is repaired by process=True.
+    Shared by the curved-planform builders (trapezoid, gothic, parabolic,
+    ogive, ...). `outline` is an open vertex chain in the (x,y) plane (already
+    scaled to meters); the closing base segment (last vertex back to the first)
+    is implied. We extrude through a shapely Polygon so the cap triangulation is
+    robust for ANY convex OR concave outline - the earlier fan-from-vertex-0
+    approach produced degenerate/overlapping triangles on strongly convex
+    profiles (e.g. the ogive), yielding a non-watertight, non-volume mesh.
+
+    The profile is built in the (x,y) plane and extruded along +z by trimesh
+    (which extrudes about the centroid in z), then recentred so the prism spans
+    z in [-thick/2, +thick/2] - matching the make_vane frame (skin at z=0 plane,
+    fin in +y, chord in +x).
     """
-    m = len(outline)
-    t = thick / 2.0
-    verts = np.vstack([
-        np.column_stack([outline, np.full(m, -t)]),
-        np.column_stack([outline, np.full(m, +t)]),
-    ])
-    faces = []
-    for i in range(1, m - 1):                     # the two flat caps
-        faces.append([0, i + 1, i])
-        faces.append([m, m + i, m + i + 1])
-    for i in range(m):                            # the thin rim
-        j = (i + 1) % m
-        faces.append([i, j, m + j])
-        faces.append([i, m + j, m + i])
-    mesh = trimesh.Trimesh(vertices=verts, faces=np.array(faces), process=True)
+    # Drop any consecutive duplicate vertices (a repeated apex/TE point makes
+    # shapely's ring invalid) before forming the closed polygon.
+    pts = [tuple(p) for p in outline]
+    dedup = [pts[0]]
+    for p in pts[1:]:
+        if abs(p[0] - dedup[-1][0]) > 1e-12 or abs(p[1] - dedup[-1][1]) > 1e-12:
+            dedup.append(p)
+    poly = ShapelyPolygon(dedup)
+    if not poly.is_valid:                          # self-touch / winding repair
+        poly = poly.buffer(0)
+    mesh = trimesh.creation.extrude_polygon(poly, height=thick)
+    # extrude_polygon puts the polygon at z=0 and extrudes to z=+thick; shift to
+    # span [-thick/2, +thick/2] so it straddles the skin plane like make_vane.
+    mesh.apply_translation((0.0, 0.0, -thick / 2.0))
     mesh.fix_normals()
     return mesh
 
@@ -400,6 +420,64 @@ def make_gothic_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
     outline = np.vstack([
         le,
         [[length, h], [length, 0.0]],              # flat top, vertical TE
+    ])
+    return _extrude_outline(outline, thick)
+
+
+def make_parabolic_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
+    """One PARABOLIC-planform vane in the make_vane frame: apex (zero height) at
+    the LE/origin, full height h at the trailing edge, like the delta - but the
+    TOP EDGE bulges CONVEXLY ABOVE the delta's straight ramp.
+
+    Same orientation as make_delta_vane (apex forward, vertical TE) so this is a
+    fair A/B against the delta champion; only the top-edge curve differs. Uses
+    the K=1 ("full") parabolic nose-cone profile from Wikipedia's nose-cone
+    design, with the cone AXIS mapped to the vane chord (x: tip=LE -> base=TE)
+    and the cone RADIUS mapped to vane height (y):
+        y = h * (2 r - r^2),  r = x / length
+    so y(0)=0 (apex at LE), y(length)=h (full height at TE), convex throughout.
+    The fuller forward area is hypothesized to shed a stronger early vortex than
+    the delta's straight ramp.
+    """
+    n = 16
+    top = np.array([[
+        r * length,                                # x: LE apex -> TE
+        h * (2.0 * r - r * r),                      # y: K=1 parabola (convex)
+    ] for r in np.linspace(0.0, 1.0, n)])
+    outline = np.vstack([
+        top,
+        [[length, 0.0]],                           # vertical trailing edge -> base
+    ])
+    return _extrude_outline(outline, thick)
+
+
+def make_ogive_vane(h: float, length: float, thick: float) -> trimesh.Trimesh:
+    """One TANGENT-OGIVE-planform vane in the make_vane frame: apex (zero height)
+    at the LE/origin, full height h at the trailing edge, like the delta - but
+    the TOP EDGE is a circular arc bulging CONVEXLY above the delta ramp,
+    tangent to the full-height line at the TE (the classic bullet/pointed-arch
+    "ogive" nose profile, fuller than the parabolic with a crisp LE apex).
+
+    Standard tangent-ogive (Wikipedia nose-cone design), cone axis -> vane chord
+    (tip=LE -> base=TE), cone radius -> vane height. With overall length L and
+    base height (radius) h, the ogive radius is rho = (h^2 + L^2) / (2h) and the
+    profile measured from the TIP (distance xt = x along the chord from the LE)
+    is:
+        y(xt) = sqrt(rho^2 - (L - xt)^2) + (h - rho)
+    which gives y(0)=0 at the apex and y(L)=h at the base, convex and tangent to
+    y=h at the TE.
+    """
+    n = 18
+    rho = (h * h + length * length) / (2.0 * h)     # tangent-ogive radius
+    top = np.array([[
+        xt,                                         # x along chord: LE apex -> TE
+        math.sqrt(max(0.0, rho * rho - (length - xt) ** 2)) + (h - rho),
+    ] for xt in np.linspace(0.0, length, n)])
+    top[0, 1] = 0.0                                 # pin apex exactly to y=0
+    top[-1, 1] = h                                  # pin TE exactly to y=h
+    outline = np.vstack([
+        top,
+        [[length, 0.0]],                           # vertical trailing edge -> base
     ])
     return _extrude_outline(outline, thick)
 
@@ -516,6 +594,8 @@ def build_article(name: str, h_mm: float | None, alpha_deg: float,
             "trap": make_trapezoid_vane,
             "gothic": make_gothic_vane,
             "airfoil": make_airfoil_vane,
+            "parabolic": make_parabolic_vane,
+            "ogive": make_ogive_vane,
         }.get(shape, make_vane)
         # Toe sense: "out" splays the leading edges apart (each vane yawed so
         # its LE points away from the slice center - the IMP74 default);
