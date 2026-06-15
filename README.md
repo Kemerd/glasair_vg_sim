@@ -1,13 +1,130 @@
 # Glasair III Vortex Generator Placement Study
 
-Automated OpenFOAM CFD pipeline to find optimal vortex generator (VG) placement,
-height, and spacing on a Stoddard-Hamilton Glasair III, for three surfaces: wing
-ahead of the ailerons, horizontal stabilizer underside ahead of the elevator, and
-vertical fin (both sides) ahead of the rudder. The pipeline narrows the flight-test
-matrix to 1-2 candidate VG layouts per surface; tuft-visualization flight testing
-remains the final verification step. **Trust deltas, not absolutes** — RANS near
-CLmax carries 5-10% uncertainty on absolute numbers, so every conclusion is framed
-as VG-on vs VG-off (or position A vs position B) on identical meshes and settings.
+Automated CFD pipeline to find the optimal vortex generator (VG) for a
+Stoddard-Hamilton Glasair III — the geometry that buys the most stall recovery
+for the least cruise drag, so the owner can 3D-print the part and a placement
+jig and install a real set on the airplane. **Trust deltas, not absolutes** —
+RANS near CLmax carries 5–10% uncertainty on absolute numbers, so every
+conclusion is framed as VG-on vs VG-off (or A vs B) on identical meshes and
+settings.
+
+> **Why this repo exists.** The Glasair III is a slick, fast, short-wing
+> homebuilt with a relatively sharp stall. Vortex generators — small vanes that
+> stir high-energy air down into the boundary layer — can tame that stall and
+> lower approach/landing speeds, but the folklore around them (how tall, how
+> far apart, what shape, what angle, what they cost in cruise) is inconsistent
+> and largely un-quantified for *this* airfoil. This project replaces the
+> hangar-talk with numbers: a GPU-accelerated CFD sweep over VG height, shape,
+> incidence, spacing, and chord position, scoring each design on the only two
+> things that matter to the pilot — **does it un-stall the wing, and what does
+> it cost me at cruise.**
+
+---
+
+## ⭐ The VG optimization study (the main event)
+
+> **Status: ~80% complete (2026-06-15), running autonomously on a GPU cluster
+> of one (RTX 5090). Live results: [`gpu/rapidcfd/06-14-26_results.md`](gpu/rapidcfd/06-14-26_results.md).
+> Final dated report `06-15-26_results.md` + STL/jig + spanwise install plan land
+> when the last cases drain.**
+
+### The winner so far 🏆
+
+**A 12 mm-long, 8 mm-tall delta (triangular-ramp) vane, set at 10° incidence,
+spaced ~50 mm, counter-rotating pairs, front tips at 7% chord.**
+
+| | result | vs the clean stalled wing |
+| --- | --- | --- |
+| **Stall recovery** (α = 18°) | Cl 1.748, Cd 0.0926, L/D 18.9 | Cd **−79%**, L/D 3.6 → 18.9 |
+| **Cruise tax** (α = 2°, 200 mph) | Cd 0.01232 | **+15.8%** — the lowest of 40+ configs |
+| **Cruise speed lost** | **~1–2.6 kt** | (vs ~6–13 kt for the naive config) |
+
+In plain terms: it takes a deeply stalled wing (drag quadrupled, lift collapsing)
+and **reattaches the flow** — cutting drag ~79% and roughly **quintupling L/D** —
+while costing only a couple of knots at cruise. It's also small and cheap to
+3D-print.
+
+### The five things that decided it
+
+| Lever | Finding |
+| --- | --- |
+| **Shape** | The simple **delta (sharp triangular ramp) beats every fancier shape** tested — rectangular plate, Stolspeed swept fin, trapezoid (cropped delta), gothic (concave swept LE), and a cambered airfoil-section vane. The sharp ramp sheds the tightest, steadiest vortex. (Trapezoid & gothic make *more lift* but cost more drag/cruise; the airfoil-section went unsteady and lost lift.) |
+| **Height** | **Micro-VGs work.** 6, 8, and 12 mm all recover the stall (it's a gentle gradient, not a cliff). 8 mm is the sweet spot — nearly the 12 mm's stall recovery, steadier flow, *lower* cruise tax (short vane hides in the thin cruise boundary layer), and a smaller print. 16 mm is *too tall* (spoiler effect, lift −31%). |
+| **Incidence** | **8–10° is optimal**, not the 15° the literature inherits. 8° minimizes drag, 10° maximizes lift; 20° over-yaws. |
+| **Spacing (pitch)** | Wider is better for cruise (fewer vanes), down to a floor: 50–70 mm all work well, but **35 mm is catastrophic** — crowded vanes merge into one ragged vortex and the wing *re-stalls*. |
+| **Chord position** | **7% chord (front tips)** is the sweet spot — matches both the IMP74 flight-test number and Stolspeed's field-proven 8–12% band. Pushing the row aft to 15%+ keeps stall-class drag (the vane ends up inside the separated flow). |
+
+### What was tested (40+ configurations)
+
+A 2D RANS slice of one VG pitch (periodic spanwise) on the gapless
+LS(1)-0413 wing section at the aileron station, swept across:
+
+- **Shapes:** rectangular plate · delta ramp · Stolspeed swept fin · trapezoid
+  (l = 4h cropped delta) · gothic planform · cambered airfoil-section
+- **Heights:** 6 · 8 · 10 · 12 · 16 mm
+- **Incidence:** 5 · 8 · 10 · 12 · 15 · 20°
+- **Pitch:** 35 · 50 · 60 · 70 · 90 · 110 mm
+- **Chord position:** 7 · 15 · 30 · 45%
+- **Layout:** counter-rotating pairs vs single-alternating; toe-out vs toe-in
+- **Conditions:** stall (α = 18°, Re 2.2e6) and cruise drag-tax (α = 2°,
+  200 mph, Re 5.52e6) for every serious contender; stall-onset checks at 16°;
+  a stall-development polar (α = 15/16/17/18) on the top configs *(in progress)*
+
+### The cruise-vs-stall tradeoff, honestly
+
+A *passive* VG can only add drag when the flow is attached, so none of these
+"raise" cruise speed — the best achievable is a stall fix that costs ~nothing
+at cruise. The 8 mm micro-delta gets close: it hides inside the thin cruise
+boundary layer (≈ no drag) yet still bites the thick stall boundary layer at
+high alpha. The realistic airplane-level penalty for a 25–55% span install is
+**~1–2.6 kt** off a ~224 kt true cruise.
+
+### Progressive spanwise stall (the install plan) *(in progress)*
+
+The Glasair III wing is swept and tapered. The plan is one printed vane placed
+in **two spacing zones**: **wider pitch inboard** (weaker vortices → root stalls
+*first*, so the ailerons stay effective and the nose drops cleanly) and
+**tighter pitch outboard** over the ailerons (strongest attachment → roll
+control held deepest into the stall). VGs are oriented to the *airflow* (a
+spanwise reference line square to the fuselage centerline), not the swept
+leading edge. CFD for the inboard "stalls-first" zone is running now.
+
+### How the study is run
+
+The solver is **RapidCFD** (a CUDA/Thrust GPU fork of OpenFOAM 2.3) running on
+an RTX 5090, single-precision with double-accumulated reductions for stable
+convergence. Meshes are built with OpenFOAM v2506 `snappyHexMesh`
+(~2.4–2.7 M cells/case). Each case runs a two-stage scheme ramp (upwind →
+limitedLinearV) and is scored on the last-500-iteration mean. The whole sweep is
+orchestrated by a chain of GPU-idle-gated queues so exactly one case solves at a
+time, with a disk janitor that reclaims finished-case mesh files to keep the run
+flat over days. Everything regenerates from `gpu/rapidcfd/build_cases.py`.
+
+```
+gpu/rapidcfd/
+  build_cases.py        # case factory — all shapes/heights/angles/pitches; `--only NAME...`
+  run_all.sh            # WSL runner (mesh → GPU solve → copy results home)
+  report.py             # tail-averaged Cl/Cd table + VG-vs-clean deltas
+  06-14-26_results.md   # dated study report (the full force table + findings)
+  results/<case>/       # per-case forceCoeffs + logs
+  assets/               # generated VG + wing STLs
+```
+
+**Methodology caveats** (also in the dated report): steady RANS on a separated
+flow gives limit-cycle averages, so trust the *ranking* over the third digit;
+kOmegaSST is fully turbulent (no transition model) and known to *under*-predict
+streamwise-vortex strength, so the real VG benefit is likely a touch *better*
+than shown; the periodic slice is an infinite array (no tip/fuselage effects).
+
+---
+
+## The original toolkit & validation pipeline
+
+The sections below document the geometry toolkit, the `aircraft.yaml`
+single-source-of-truth parameter system, and the clean-section validation
+pipeline (XFOIL + NASA anchors) that underpin the study above. The VG study
+also covers the horizontal stabilizer (underside ahead of the elevator) and
+vertical fin as future surfaces; the wing is done first.
 
 ## Repository layout
 
@@ -178,9 +295,12 @@ changes nothing in either incompressible code except the bookkeeping.)
 
 | Milestone | Scope | Status |
 | --- | --- | --- |
-| M0 | Repo scaffold, `aircraft.yaml`, geometry toolkit + unit tests | In progress |
-| M1 | Phase-1 clean 2D validation case end-to-end, gate report | In progress (driver + gate ready; solver bring-up blocked on WSL repair) |
-| M2 | jBAY fvOptions source + unit validation case | Pending |
-| M3 | Study-1 sweep runner, 2-case smoke sweep with auto post | Pending |
-| M4 | Full Study-1 screening sweep; Studies 2-3 templates | Pending |
-| M5 | Reporting pipeline (`results/REPORT.md` per study) | Pending |
+| M0 | Repo scaffold, `aircraft.yaml`, geometry toolkit + unit tests | Done |
+| M1 | Phase-1 clean 2D validation (driver + gate + XFOIL/NASA anchors) | Done (toolkit); CPU clean-section cross-check used to validate the GPU pipeline |
+| GPU pivot | RapidCFD (OpenFOAM-2.3 CUDA fork) built for the RTX 5090; transform-patch BC bug solved via cyclicAMI sides | Done |
+| **VG study** | **40+ resolved configs — shape × height × incidence × pitch × position × layout, at stall and cruise** | **~80% — champion found (8 mm delta, β10, ~50 mm); polar + final report in progress** |
+| Deliverables | Final dated report, printable VG STL (curved base), wing-hugging placement jig, progressive spanwise install plan | Pending (after the last cases drain) |
+
+*(The original M2–M5 milestones — jBAY fvOptions, multi-study sweep runner,
+per-study reporting — were superseded by the direct GPU-resolved-VG approach,
+which models the actual vane geometry rather than a momentum source.)*
