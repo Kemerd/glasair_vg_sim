@@ -74,11 +74,18 @@ and a **high-lift vane on the outboard half over the ailerons** (so the ailerons
 stay attached and authoritative deepest into the stall). Estimated for **inboard
 50% = 6 mm delta @ 70 mm, outboard 50% = 8 mm parabolic @ 50 mm**:
 
-| zone | VG | role | local stall benefit |
-|---|---|---|---|
-| inboard (root → mid) | 6 mm delta, 70 mm (widen/bare at root) | stalls **first** (warning), cheap cruise | root lets go first by design |
-| outboard (mid → tip, ailerons) | 8 mm parabolic, 50 mm | **max aileron authority** (highest lift) | holds attached longest, ~−3.7 kt local |
-| **whole airplane** | mixed | safe stall progression + roll control | **cruise cost ≈ −4.0 kt total** |
+| zone | VG | role |
+|---|---|---|
+| inboard (root → mid) | 6 mm delta, 70 mm (widen/bare at root) | stalls **first** (warning), cheap cruise |
+| outboard (mid → tip, ailerons) | 8 mm parabolic, 50 mm | **max aileron authority** (highest lift) |
+
+**Whole-airplane result (full-span mixed install):** stall speed **−3.1 kt**,
+cruise **−4.0 kt**. The stall drop (−3.1) beats the all-6 mm full-span build
+(−2.4) and nearly matches all-parabolic (−3.7), while the cruise cost (−4.0)
+sits between them (all-6 mm −2.8, all-parabolic −5.2). So the mix buys most of
+the parabolic's stall benefit at a middling cruise cost **plus** the two things
+a uniform build can't give: a root that **stalls first** (warning + nose-drop)
+and ailerons that **stay authoritative deepest into the stall**.
 
 That ~−4.0 kt cruise sits between the all-6 mm (−2.8 kt) and all-parabolic
 (−5.2 kt) full-span numbers — you pay a bit more than the pure-efficiency build,
