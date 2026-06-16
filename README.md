@@ -31,34 +31,59 @@ settings.
 ### 🏁 The leaderboard — knots gained vs knots paid (preliminary)
 
 The bottom line for an installer: **how many knots of stall speed do you gain,
-and how many knots of cruise do you pay?** Ranked by the ratio of the two
-(stall-knots gained per cruise-knot lost) for a representative **40%-span
-install**, off the Glasair III's ~69.5 kt clean stall and ~224 kt true cruise:
+and how many knots of cruise do you pay?** Ranked by stall-knots gained per
+cruise-knot lost, off the Glasair III's ~69.5 kt clean stall and ~224 kt true
+cruise. Stall reduction is shown for the VG'd span; **cruise loss is shown for
+both a 40%-span install (outboard, over the ailerons) and a 100%-span install
+(root-to-tip)** so you can see the cost of going wider:
 
-| # | VG config | stall speed ↓ | cruise speed ↓ | ratio | net kt |
-|---|---|---|---|---|---|
-| **1** | **6 mm delta, 70 mm** ★ | **−2.4 kt** | **−1.1 kt** | **2.1×** | +1.2 |
-| 2 | 8 mm parabolic, 50 mm | −3.7 kt | −2.1 kt | 1.7× | **+1.6** |
-| 3 | 8 mm ogive, 50 mm | −3.7 kt | −2.1 kt | 1.7× | +1.5 |
-| 4 | 12 mm delta, 70 mm | −3.8 kt | −2.4 kt | 1.6× | +1.4 |
-| 5 | 8 mm delta, 50 mm | −2.9 kt | −1.9 kt | 1.5× | +1.0 |
-| 6 | 12 mm delta, 50 mm | −4.0 kt | −3.2 kt | 1.3× | +0.8 |
-| 7 | 6 mm delta, 50 mm | −1.6 kt | −1.5 kt | 1.1× | +0.1 |
-| 8 | 12 mm stol fin, 50 mm | −4.0 kt | −6.8 kt | 0.6× | −2.7 |
-| 9 | 12 mm rect, 50 mm (the naive default) | +1.6 kt* | −9.7 kt | — | −11.3 |
+| # | VG config | stall speed ↓ | cruise ↓ (40% span) | cruise ↓ (100% span) | ratio | net kt |
+|---|---|---|---|---|---|---|
+| **1** | **6 mm delta, 70 mm** ★ | **−2.4 kt** | **−1.1 kt** | −2.8 kt | **2.1×** | +1.2 |
+| 2 | 8 mm parabolic, 50 mm | −3.7 kt | −2.1 kt | −5.2 kt | 1.7× | **+1.6** |
+| 3 | 8 mm ogive, 50 mm | −3.7 kt | −2.1 kt | −5.2 kt | 1.7× | +1.5 |
+| 4 | 12 mm delta, 70 mm | −3.8 kt | −2.4 kt | −5.8 kt | 1.6× | +1.4 |
+| 5 | 8 mm delta, 50 mm | −2.9 kt | −1.9 kt | −4.7 kt | 1.5× | +1.0 |
+| 6 | 12 mm delta, 50 mm | −4.0 kt | −3.2 kt | −7.9 kt | 1.3× | +0.8 |
+| 7 | 6 mm delta, 50 mm | −1.6 kt | −1.5 kt | −3.7 kt | 1.1× | +0.1 |
+| 8 | 12 mm stol fin, 50 mm | −4.0 kt | −6.8 kt | −16 kt | 0.6× | −2.7 |
+| 9 | 12 mm rect, 50 mm (naive default) | +1.6 kt* | −9.7 kt | −23 kt | — | −11.3 |
 
 *\*the naive flat-plate config actually **raises** stall speed (it loses lift)
 while costing ~10 kt of cruise — a textbook example of why the optimization
 mattered. †stall numbers use the section Clmax (conservative); the real
-stall-angle extension makes the stall gains somewhat larger.*
+stall-angle extension makes the gains somewhat larger. ‡the "stalls at AoA"
+column is being filled by the high-AoA polar — clean stalls ~16–17°; the top
+configs hold attached past 18° (exact angles TBD from the 20°/22° runs).*
 
 **Two ways to read it:** **#1 (6 mm delta @ 70 mm)** is the most *efficient* —
-the best stall-knots-per-cruise-knot and the smallest cruise hit (great if you
-fly fast and want the safety nearly free). **#2–#4 (parabolic/ogive @ 8 mm, or
-12 mm delta @ 70 mm)** give the biggest *net* knots — more stall-speed reduction
-(≈3.7–3.8 kt) for a still-modest ~2 kt cruise cost (great if you want maximum
-short-field/landing benefit). Pick by whether you weight cruise or stall margin
-— **all of the top configs are a net win; the naive flat plate is not.**
+best stall-knots-per-cruise-knot, smallest cruise hit, and even at 100% span it
+only costs ~2.8 kt. **#2–#4 (parabolic/ogive @ 8 mm, 12 mm delta @ 70 mm)** give
+the biggest *net* knots (≈3.7–3.8 kt off the stall) for a modest cruise bill at
+40% span (~2 kt) but a real one at 100% (~5–6 kt). Pick by span and priority —
+**all of the top configs are a net win; the naive flat plate is not.**
+
+### 🔀 Mixed install — root-first stall + max aileron authority
+
+Your idea: a **cheap-cruise efficient vane inboard** (which can be spaced wide
+or left partly bare so the **root stalls first** → buffet warning + nose-drop)
+and a **high-lift vane on the outboard half over the ailerons** (so the ailerons
+stay attached and authoritative deepest into the stall). Estimated for **inboard
+50% = 6 mm delta @ 70 mm, outboard 50% = 8 mm parabolic @ 50 mm**:
+
+| zone | VG | role | local stall benefit |
+|---|---|---|---|
+| inboard (root → mid) | 6 mm delta, 70 mm (widen/bare at root) | stalls **first** (warning), cheap cruise | root lets go first by design |
+| outboard (mid → tip, ailerons) | 8 mm parabolic, 50 mm | **max aileron authority** (highest lift) | holds attached longest, ~−3.7 kt local |
+| **whole airplane** | mixed | safe stall progression + roll control | **cruise cost ≈ −4.0 kt total** |
+
+That ~−4.0 kt cruise sits between the all-6 mm (−2.8 kt) and all-parabolic
+(−5.2 kt) full-span numbers — you pay a bit more than the pure-efficiency build,
+and in return you get the **best-of-both**: a root that stalls first for warning,
+ailerons that bite hardest when you need them, and a smooth root→tip stall
+progression. *(This is an estimate from the per-zone slice data; a true swept-
+wing 3D run would refine it — but the 2D pieces and the pitch-vs-stall curve
+strongly support it.)*
 
 ### The recommended part 🏆
 

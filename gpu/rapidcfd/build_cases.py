@@ -252,6 +252,17 @@ CASE_MATRIX = [
     # Wave H; clean a16 already exists).
     case("vg06d70b10_a16", h_mm=6.0, alpha=16.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
     case("vg08d50b10_a16", h_mm=8.0, alpha=16.0, shape="delta", beta_deg=10.0),
+    # --- batch 14 (Wave L): HIGH-AoA — find each king's actual STALL angle ----
+    # The kings hold attached at 18 (clean stalls ~16-17). Push to 20/22 to find
+    # WHERE each finally lets go = the real "stalls at AoA" for the leaderboard.
+    # Champion 6mm@70 + the max-net parabolic@8 + 12mm@70. clean_a20 anchors how
+    # deep the clean is gone by 20.
+    case("clean_a20", alpha=20.0),
+    case("vg06d70b10_a20", h_mm=6.0, alpha=20.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg06d70b10_a22", h_mm=6.0, alpha=22.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg08pb50b10_a20", h_mm=8.0, alpha=20.0, shape="parabolic", beta_deg=10.0),
+    case("vg08pb50b10_a22", h_mm=8.0, alpha=22.0, shape="parabolic", beta_deg=10.0),
+    case("vg12d70b10_a20", h_mm=12.0, alpha=20.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
 ]
 
 
