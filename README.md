@@ -28,21 +28,48 @@ settings.
 > Final dated report `06-15-26_results.md` + STL/jig + spanwise install plan land
 > when the last cases drain.**
 
-### The winner so far 🏆
+### 🏁 The leaderboard — knots gained vs knots paid (preliminary)
 
-**A 12 mm-long, 8 mm-tall delta (triangular-ramp) vane, set at 10° incidence,
-spaced ~50 mm, counter-rotating pairs, front tips at 7% chord.**
+The bottom line for an installer: **how many knots of stall speed do you gain,
+and how many knots of cruise do you pay?** Ranked by the ratio of the two
+(stall-knots gained per cruise-knot lost) for a representative **40%-span
+install**, off the Glasair III's ~69.5 kt clean stall and ~224 kt true cruise:
 
-| | result | vs the clean stalled wing |
-| --- | --- | --- |
-| **Stall recovery** (α = 18°) | Cl 1.748, Cd 0.0926, L/D 18.9 | Cd **−79%**, L/D 3.6 → 18.9 |
-| **Cruise tax** (α = 2°, 200 mph) | Cd 0.01232 | **+15.8%** — the lowest of 40+ configs |
-| **Cruise speed lost** | **~1–2.6 kt** | (vs ~6–13 kt for the naive config) |
+| # | VG config | stall speed ↓ | cruise speed ↓ | ratio | net kt |
+|---|---|---|---|---|---|
+| **1** | **6 mm delta, 70 mm** ★ | **−2.4 kt** | **−1.1 kt** | **2.1×** | +1.2 |
+| 2 | 8 mm parabolic, 50 mm | −3.7 kt | −2.1 kt | 1.7× | **+1.6** |
+| 3 | 8 mm ogive, 50 mm | −3.7 kt | −2.1 kt | 1.7× | +1.5 |
+| 4 | 12 mm delta, 70 mm | −3.8 kt | −2.4 kt | 1.6× | +1.4 |
+| 5 | 8 mm delta, 50 mm | −2.9 kt | −1.9 kt | 1.5× | +1.0 |
+| 6 | 12 mm delta, 50 mm | −4.0 kt | −3.2 kt | 1.3× | +0.8 |
+| 7 | 6 mm delta, 50 mm | −1.6 kt | −1.5 kt | 1.1× | +0.1 |
+| 8 | 12 mm stol fin, 50 mm | −4.0 kt | −6.8 kt | 0.6× | −2.7 |
+| 9 | 12 mm rect, 50 mm (the naive default) | +1.6 kt* | −9.7 kt | — | −11.3 |
 
-In plain terms: it takes a deeply stalled wing (drag quadrupled, lift collapsing)
-and **reattaches the flow** — cutting drag ~79% and roughly **quintupling L/D** —
-while costing only a couple of knots at cruise. It's also small and cheap to
-3D-print.
+*\*the naive flat-plate config actually **raises** stall speed (it loses lift)
+while costing ~10 kt of cruise — a textbook example of why the optimization
+mattered. †stall numbers use the section Clmax (conservative); the real
+stall-angle extension makes the stall gains somewhat larger.*
+
+**Two ways to read it:** **#1 (6 mm delta @ 70 mm)** is the most *efficient* —
+the best stall-knots-per-cruise-knot and the smallest cruise hit (great if you
+fly fast and want the safety nearly free). **#2–#4 (parabolic/ogive @ 8 mm, or
+12 mm delta @ 70 mm)** give the biggest *net* knots — more stall-speed reduction
+(≈3.7–3.8 kt) for a still-modest ~2 kt cruise cost (great if you want maximum
+short-field/landing benefit). Pick by whether you weight cruise or stall margin
+— **all of the top configs are a net win; the naive flat plate is not.**
+
+### The recommended part 🏆
+
+**A short delta (triangular-ramp) vane, 6 mm tall, 10° incidence, 70 mm
+spacing, counter-rotating pairs, front tips at 7% chord** — the #1 efficiency
+pick, used as **one part on all surfaces** (wing, plus elevator/rudder for
+control authority when slow), with **wider spacing or a bare patch at the wing
+root** so the root stalls first (natural buffet warning). It reattaches the
+stalled wing (drag −80%, L/D ~×5) for under ~1.6 kt of cruise. If you want the
+most stall-speed reduction instead, step up to the **8 mm parabolic** or
+**12 mm delta @ 70 mm** (#2–#4) — same install, a touch more part.
 
 ### The five things that decided it
 

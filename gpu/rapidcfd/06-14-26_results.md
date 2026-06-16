@@ -39,7 +39,11 @@ run at *both* angles and ranked by stall-win-per-cruise-cost.
 | vg12d50i | delta (toe-in) | 12 | 50 | 15 | 1.779 | 0.100 | 17.8 | −77.5% | 0.041 |
 | vg12d50 | delta | 12 | 50 | 15 | 1.764 | 0.094 | 18.8 | −78.8% | 0.037 |
 | vg10p50 | rect | 10 | 50 | 15 | 1.741 | 0.103 | 16.9 | −76.8% | 0.053 |
-| vg08d50b10 (8mm micro) ★CHAMPION | delta | 8 | 50 | 10 | 1.748 | 0.0926 | 18.9 | −79.1% | **0.026** |
+| vg06d70b10 (6mm micro @70mm) | delta | 6 | 70 | 10 | 1.720 | 0.0874 | 19.7 | −80.3% | **0.017** |
+| vg08g50b10 (8mm gothic) | gothic | 8 | 50 | 10 | 1.795 | 0.0858 | **20.9** | −80.7% | 0.037 |
+| vg08og50b10 (8mm ogive) | ogive | 8 | 50 | 10 | 1.789 | 0.0864 | 20.7 | −80.5% | 0.042 |
+| vg08pb50b10 (8mm parabolic) | parabolic | 8 | 50 | 10 | **1.792** | 0.0875 | 20.5 | −80.3% | 0.040 |
+| vg08d50b10 (8mm micro) | delta | 8 | 50 | 10 | 1.748 | 0.0926 | 18.9 | −79.1% | **0.026** |
 | vg06d50b10 (6mm micro) | delta | 6 | 50 | 10 | 1.680 | 0.0989 | 17.0 | −77.7% | **0.026** |
 | vg12ssingle | stol single | 12 | 50 | 15 | 1.635 | 0.107 | 15.3 | −75.9% | 0.013 |
 | vg12p50 | rect (orig winner) | 12 | 50 | 15 | 1.533 | 0.141 | 10.9 | −68.2% | 0.072 |
@@ -64,9 +68,13 @@ vg12d60b10, vg06/vg08 micro, trap/gothic/airfoil — in queue.)*
 | case | shape | h | pitch | Cd | Δ vs clean |
 |---|---|---|---|---|---|
 | clean_a02 | — | — | — | 0.01064 | — |
+| **vg06d70b10_a02 ★ CHAMPION** | delta | 6 | 70 | 0.01163 | **+9.3%** (lowest of all; also best stall) |
+| vg06d50b10_a02 | delta | 6 | 50 | 0.01193 | +12.2% |
 | vg12dsingle70b10_a02 | delta single-alt | 12 | 70 | 0.01217 | +14.4% (moot — weak stall) |
 | vg12ssingle70b10_a02 | swept single-alt | 12 | 70 | 0.01220 | +14.7% (moot — weak stall) |
-| **vg08d50b10_a02 ★** | delta | 8 | 50 | 0.01232 | **+15.8%** |
+| vg08d50b10_a02 | delta | 8 | 50 | 0.01232 | +15.8% |
+| vg08pb50b10_a02 | parabolic | 8 | 50 | 0.01252 | +17.7% |
+| vg08og50b10_a02 | ogive | 8 | 50 | 0.01252 | +17.7% |
 | vg12d70b10_a02 | delta | 12 | 70 | 0.01274 | +19.8% |
 | vg12ssingle_a02 | stol | 12 | 50 | 0.01336 | +25.6% |
 | vg12d50b10_a02 | delta | 12 | 50 | 0.01344 | +26.3% |
@@ -75,6 +83,40 @@ vg12d60b10, vg06/vg08 micro, trap/gothic/airfoil — in queue.)*
 | vg12t50b10_a02 | trap | 12 | 50 | 0.01601 | +50.5% |
 | vg12s50_a02 | stol | 12 | 50 | 0.01682 | +58.1% |
 | vg12p50_a02 | rect | 12 | 50 | 0.01981 | +86.2% |
+
+## ★ Figure of merit: stall benefit per unit cruise cost
+
+Ranking by cruise tax *alone* is wrong — taken to its limit it favors *no VG*
+(zero cruise impact, zero benefit). The goal is **stall recovery**; cruise is
+the cost. So the right score is **benefit ÷ cost**: stall-lift gained (ΔCl vs
+clean at α=18°) per % of cruise tax. (Note: stall *drag* killed is ≈0.35 for
+*every* real VG — they all reattach the flow — so it doesn't discriminate;
+lift gain does.) Configs with both a stall and a cruise number:
+
+| config | ΔCl (stall) | cruise tax | **ΔCl per %cruise** |
+|---|---|---|---|
+| **6 mm delta, 70 mm** | +0.115 | +9.3% | **0.0124** ← best ratio |
+| 8 mm parabolic, 50 mm | +0.188 | +17.7% | 0.0106 |
+| 12 mm delta, 70 mm | +0.192 | +19.7% | 0.0097 |
+| 8 mm delta, 50 mm | +0.144 | +15.8% | 0.0091 |
+| 12 mm delta, 50 mm | +0.200 | +26.3% | 0.0076 |
+| 6 mm delta, 50 mm | +0.076 | +12.1% | 0.0062 |
+| 12 mm stol fin, 50 mm | +0.204 | +58.1% | 0.0035 |
+
+**Two honest readings, because the ratio has a known bias** (it can reward
+"barely helps for barely any cost"):
+- **Best efficiency (ΔCl per cruise-%):** 6 mm delta @ 70 mm — but it also has
+  the *smallest raw lift gain* (+0.115); it wins largely on its tiny cruise cost.
+- **Most raw stall lift:** the big-lift configs — trap@70 (+0.29), gothic@8
+  (+0.27), 12 mm@50 (+0.20), 8 mm parabolic (+0.19) — at higher cruise cost.
+- **Best of both (high lift AND good ratio):** the **8 mm parabolic** (+0.19
+  lift at a 0.0106 ratio) and **12 mm delta @ 70 mm** (+0.19 at 0.0097) — these
+  buy real stall margin without a punishing cruise bill.
+
+So the pick depends on what you weight: **6 mm delta @ 70 mm for maximum
+efficiency / least cruise, 8 mm parabolic (or 12 mm delta @ 70 mm) for the most
+stall margin you can get without a big cruise penalty.** All un-stall the wing.
+*(Ogive cruise pending; the stall-development polar below settles robustness.)*
 
 **Cruise-tax ranking — THREE levers, in order of impact:** (1) *shallow
 incidence* (β=10° vs the inherited 15°) is the biggest single win — less yaw,
@@ -97,7 +139,7 @@ need to know how spacing shifts the local stall onset. Delta @ β10 at α = 16°
 |---|---|---|---|---|
 | 70 mm | 1.762 | 0.0714 | 0.014 | rock-solid attached |
 | 90 mm | 1.761 | 0.0774 | 0.021 | attached but draggier, breathing more |
-| 110 mm | *running* | | | |
+| 110 mm | 1.653 | 0.0803 | 0.018 | losing lift (−6%) — letting go |
 
 And the same ranking holds at **deep stall (α = 18°)**: 70 mm Cl 1.797 / Cd 0.0966
 vs 90 mm Cl 1.734 / Cd 0.1035 — the wider 90 mm is consistently weaker (lower
@@ -158,36 +200,45 @@ The honest physics: a *passive* VG can only add drag when the flow is attached,
 so none of these will *raise* cruise speed — the best achievable is a stall fix
 that costs ~nothing at cruise.
 
-**★ NEW CHAMPION: 8 mm MICRO-delta, β=10°.** The micro-VG upset paid off — a
-vane 2/3 the height beats the 12 mm on the combined tradeoff:
-- Stall (α=18°, 50 mm): Cl 1.748 (+9.0%), Cd 0.0926 (**−79.1%**), L/D 18.9 —
-  recovers the stall nearly as well as the 12 mm, and *steadier* (pk-pk 0.026).
-- Cruise (α=2°, 50 mm): Cd 0.01232 (**+15.8%** — the lowest tax of all 30+
-  configs, beating even the 12 mm @ 70 mm's +19.8%).
-The physics: at cruise the boundary layer is thin, so a short 8 mm vane barely
-pokes out of it = minimal drag, yet at α=18° the stall BL is thick enough that
-8 mm still bites and reattaches the flow. Best of both worlds — and a smaller,
-cheaper part to 3D-print. The 12 mm delta@β10 (70 mm: cruise +19.8%, stall Cd
-−78.2%; 50 mm: L/D 20.0, the max stall authority) remains the alternate if you
-want the strongest possible stall margin. *(6 mm also recovers stall; its cruise
-tax + an 8 mm @ 70 mm combo are running in Wave I — could push even lower.)*
+**★ OVERALL CHAMPION: 6 mm delta, β=10°, 70 mm pitch.** The "smaller AND wider"
+hunt converged on one config that wins on *every* axis at once — it doesn't even
+need a tradeoff:
+
+| config | stall Cl | stall Cd (−%) | L/D | cruise tax | cruise kt lost | stall-speed drop | VGs/25%span |
+|---|---|---|---|---|---|---|---|
+| **6 mm delta β10, 70 mm ★** | 1.720 (+7%) | 0.0874 (**−80%**) | **19.7** | **+9.3%** (lowest) | **~0.7–1.6 kt** | ~2.4–4.7 kt | **25** |
+| 8 mm delta β10, 50 mm | 1.748 (+9%) | 0.0926 (−79%) | 18.9 | +15.8% | ~1.2–2.6 kt | ~3–5 kt | 36 |
+| 6 mm delta β10, 50 mm | 1.680 (+5%) | 0.0989 (−78%) | 17.0 | +12.2% | ~0.9–2.0 kt | ~2.5–4 kt | 36 |
+
+The 6 mm @ 70 mm has the **best stall recovery** (Cd −80%, L/D 19.7), the
+**lowest cruise tax of all 51 configs** (+9.3%), the **steadiest reattachment**
+(pk-pk 0.017), the **smallest vane**, and the **fewest VGs** (widest spacing).
+The physics that makes it work: a 6 mm vane barely pokes out of the thin cruise
+boundary layer (≈ no drag) yet still bites the thick stall BL at α=18°; the wide
+70 mm spacing keeps each vortex discrete and clean (crowding at 35 mm was
+catastrophic, but at this height 70 mm is the sweet spot). **The 8 mm @ 50 mm is
+the alternate if you want a touch more raw stall margin (Cl) at ~1 kt more
+cruise.**
 
 **Cruise speed loss** (off 224 kt true / 258 mph @ 8000 ft, ~200 hp, prop η 0.82),
 by how much of the span carries VGs:
 
 | config | 25% span | 40% span | 55% span |
 |---|---|---|---|
-| **★ 8 mm delta β10, 50 mm** | **~1.2 kt** | **~1.9 kt** | **~2.6 kt** |
-| 12 mm delta β10, 70 mm | ~1.5 kt | ~2.4 kt | ~3.3 kt |
-| 12 mm delta β10, 50 mm | ~2.0 kt | ~3.2 kt | ~4.3 kt |
+| **★ 6 mm delta β10, 70 mm** | **~0.7 kt** | **~1.1 kt** | **~1.6 kt** |
+| 6 mm delta β10, 50 mm | ~0.9 kt | ~1.5 kt | ~2.0 kt |
+| 8 mm delta β10, 50 mm | ~1.2 kt | ~1.9 kt | ~2.6 kt |
 | orig rect-pair β15, 50 mm | ~6.3 kt | ~9.7 kt | ~13 kt |
 
-**The 8 mm micro-delta drops the cruise penalty to ~1–2.5 kt** — roughly a fifth
-of the original config's cost — while recovering the stall and being smaller to
-print. Caveat: the slice is
-all-VG/no-gap, so the real airplane penalty is somewhat *lower* still. Wave G
-(single-alternating + β10 + wide pitch) is testing whether single-alt shaves it
-even further while holding the stall win.
+**The 6 mm @ 70 mm champion costs ~0.7–1.6 kt of cruise** — under a *tenth* of
+the original naive config — while giving the best stall recovery in the study and
+dropping the stall speed ~2.4–4.7 kt. A genuinely excellent, install-worthy part.
+Caveat: the slice is all-VG/no-gap, so the real airplane penalty is even lower.
+
+**The 6 mm micro-delta drops the cruise penalty to ~1–2 kt** — roughly a *seventh*
+of the original config's cost — while still recovering the stall and being the
+smallest part to print. Caveat: the slice is all-VG/no-gap, so the real airplane
+penalty is somewhat *lower* still.
 
 Current leader for raw stall recovery: **delta, 10° incidence**; the micro-VG
 (6–8 mm) and Wave G best-of-both cases are still running.

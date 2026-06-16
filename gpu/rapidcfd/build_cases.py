@@ -233,6 +233,25 @@ CASE_MATRIX = [
     # And the OUTBOARD champion at alpha=16 (stall-onset) to prove it still
     # holds where the wide inboard is starting to give up - the progression:
     case("vg12d70b10_a16", h_mm=12.0, alpha=16.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    # --- batch 13 (Wave K): STALL-DEVELOPMENT POLAR (user 2026-06-15) ---------
+    # Take the top kings + clean across the developing stall (alpha 15/16/17;
+    # 18 already done) and AVERAGE Cd/Cl over 15-18 to find the most ROBUST
+    # winner, not just best at one angle. Kings: 6mm-delta-70 (CHAMPION),
+    # 8mm-delta-50 (alt), 12mm-delta-70. clean_a15/a17 anchor the baseline
+    # (clean_a16/a18 already exist).
+    case("clean_a15", alpha=15.0),
+    case("clean_a17", alpha=17.0),
+    case("vg06d70b10_a15", h_mm=6.0, alpha=15.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg06d70b10_a17", h_mm=6.0, alpha=17.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg08d50b10_a15", h_mm=8.0, alpha=15.0, shape="delta", beta_deg=10.0),
+    case("vg08d50b10_a17", h_mm=8.0, alpha=17.0, shape="delta", beta_deg=10.0),
+    case("vg12d70b10_a15", h_mm=12.0, alpha=15.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg12d70b10_a17", h_mm=12.0, alpha=17.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    # a16 points for the kings (6mm@70 + 8mm@50) so each has the full
+    # 15/16/17/18 set for a clean averaged polar (12mm@70 a16 already ran in
+    # Wave H; clean a16 already exists).
+    case("vg06d70b10_a16", h_mm=6.0, alpha=16.0, shape="delta", beta_deg=10.0, pitch_mm=70.0),
+    case("vg08d50b10_a16", h_mm=8.0, alpha=16.0, shape="delta", beta_deg=10.0),
 ]
 
 

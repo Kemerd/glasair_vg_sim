@@ -1,0 +1,72 @@
+/*---------------------------------------------------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  2506                                  |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+Build  : _d6aa836d-20260127 OPENFOAM=2506 patch=260127 version=2506
+Arch   : "LSB;label=32;scalar=64"
+Exec   : surfaceFeatureExtract
+Date   : Jun 16 2026
+Time   : 00:41:09
+Host   : EVERETT-STATION
+PID    : 1553805
+I/O    : uncollated
+Case   : /home/donny-linux/glasair_rapidcfd/vg06d70b10_a18
+nProcs : 1
+trapFpe: Floating point exception trapping enabled (FOAM_SIGFPE).
+fileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 5, maxFileModificationPolls 20)
+allowSystemOperations : Allowing user-supplied system call operations
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+Create time
+
+
+Note: Feature line extraction only valid on closed manifold surfaces
+
+Reading surfaceFeatureExtractDict
+
+Surfaces     : wing.stl
+Output       : wing
+Load options : offset
+Write options: writeObj=no writeVTK=off
+
+Statistics:
+Triangles    : 1008 in 1 region(s)
+Vertices     : 506
+Bounding Box : (0.01097638 -0.2151904 -0.042) (0.868644 0.09885138 0.042)
+
+Constructing feature set from included angle 150
+Selecting edges based purely on geometric tests: no
+
+Initial Feature set:
+    points : 12
+    edges  : 512
+    of which
+        region edges   : 0
+        external edges : 494
+        internal edges : 18
+
+Final Feature set:
+    points : 506
+    of which
+        convex             : 8
+        concave            : 0
+        mixed              : 4
+        non-feature        : 494
+    edges  : 512
+    of which
+        external edges     : 494
+        internal edges     : 18
+        flat edges         : 0
+        open edges         : 0
+        multiply connected : 0
+
+Writing extendedFeatureEdgeMesh to "/home/donny-linux/glasair_rapidcfd/vg06d70b10_a18/constant/extendedFeatureEdgeMesh/wing.extendedFeatureEdgeMesh"
+
+Writing featureEdgeMesh to "/home/donny-linux/glasair_rapidcfd/vg06d70b10_a18/constant/triSurface/wing.eMesh"
+ExecutionTime = 0 s  ClockTime = 0 s
+
+End
+
