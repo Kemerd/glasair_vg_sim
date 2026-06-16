@@ -50,6 +50,7 @@ run at *both* angles and ranked by stall-win-per-cruise-cost.
 | vg12a50b10 (airfoil-section) | airfoil | 12 | 50 | 10 | 1.285 | 0.1745 | 7.4 | −60.6% | 0.539 |
 | vg12p35 | rect | 12 | 35 | 15 | 1.244 | 0.319 | 3.9 | −28.1% | 0.100 |
 
+| vg12d50b05 | delta | 12 | 50 | 5 | 1.621 | 0.1005 | 16.1 | −77.3% | 0.070 |
 | vg12d50b08 | delta | 12 | 50 | 8 | 1.777 | 0.0864 | 20.6 | −80.5% | 0.057 |
 | vg12d50b12 | delta | 12 | 50 | 12 | 1.745 | 0.0962 | 18.1 | −78.3% | 0.054 |
 | vg12d50b20 | delta | 12 | 50 | 20 | 1.648 | 0.100 | 16.4 | −77.4% | 0.054 |
@@ -85,6 +86,30 @@ shallow-incidence delta pair. So the cruise champion is **delta, β10, 70 mm
 (pair)** at +19.8% — incidence and pitch matter more than going single. Plain
 shape (rect→delta→stol) barely moves cruise on its own; it's the *angle and
 spacing* that do. Wave G still tests whether single-alt shaves the last bit.
+
+## Pitch-vs-stall map (α = 16°, stall onset) — for the spanwise gradient
+
+To design a *progressive spanwise* install (root stalls first, tip holds), we
+need to know how spacing shifts the local stall onset. Delta @ β10 at α = 16°
+(clean_a16: Cl 1.572, Cd 0.0834, but *breathing* — pk-pk 0.115):
+
+| pitch | Cl | Cd | pk-pk Cd | reading |
+|---|---|---|---|---|
+| 70 mm | 1.762 | 0.0714 | 0.014 | rock-solid attached |
+| 90 mm | 1.761 | 0.0774 | 0.021 | attached but draggier, breathing more |
+| 110 mm | *running* | | | |
+
+And the same ranking holds at **deep stall (α = 18°)**: 70 mm Cl 1.797 / Cd 0.0966
+vs 90 mm Cl 1.734 / Cd 0.1035 — the wider 90 mm is consistently weaker (lower
+lift, +7% drag) at both 16° and 18°, so it gives up sooner across the whole
+stall. Exactly the monotonic pitch→stall relationship a graded install needs.
+
+**The trend is exactly what the gradient needs:** at stall onset (16°) the tight
+70 mm is cleanest (lowest Cd, smallest oscillation); 90 mm carries +8% more drag
+and ~50% more pk-pk — the wider spacing is *beginning to let go* while the tight
+one holds. So **wider pitch inboard stalls earlier, tighter pitch outboard holds
+longest** — the lever for a graded spanwise install (and the 110 mm point, plus
+the 90 mm @ 18° deep-stall point, sharpen the curve).
 
 ## Findings
 
