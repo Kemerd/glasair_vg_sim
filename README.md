@@ -23,88 +23,87 @@ settings.
 
 ## ⭐ The VG optimization study (the main event)
 
-> **Status: ~80% complete (2026-06-15), running autonomously on a GPU cluster
-> of one (RTX 5090). Live results: [`gpu/rapidcfd/06-14-26_results.md`](gpu/rapidcfd/06-14-26_results.md).
-> Final dated report `06-15-26_results.md` + STL/jig + spanwise install plan land
-> when the last cases drain.**
+> **Status: ✅ COMPLETE (2026-06-17). 63 GPU-CFD cases run autonomously on a
+> cluster of one (RTX 5090), including a full α = 2°→22° stall polar. Final
+> report: [`gpu/rapidcfd/06-17-26_results.md`](gpu/rapidcfd/06-17-26_results.md).
+> Stall numbers below are the corrected peak-to-peak Clmax method.**
 
-### 🏁 The leaderboard — knots gained vs knots paid (preliminary)
+### 🏁 The leaderboard — knots gained vs knots paid
 
 The bottom line for an installer: **how many knots of stall speed do you gain,
 and how many knots of cruise do you pay?** Off the Glasair III's ~69.5 kt clean
-stall and ~224 kt true cruise. **Both stall reduction AND cruise loss are shown
-at two span coverages** — a 40%-span install (outboard, over the ailerons) and
-a 100%-span install (root-to-tip) — because *both* scale with how much wing you
-cover. (A 40% install only VGs 40% of the span, so the un-VG'd inboard still
-stalls → smaller whole-airplane stall reduction; 100% gets the full benefit but
-the full cruise bill.) Ranked by stall-per-cruise ratio:
+stall and ~180 kt cruise. Stall reduction is now computed the **honest peak-to-
+peak way** — clean's peak Clmax (1.443 at its ~15° stall) vs each VG's peak
+Clmax at *its* higher stall angle, since `Vstall ∝ 1/√Clmax`. **Both stall and
+cruise are shown at two span coverages** — 40% (outboard, over the ailerons) and
+100% (root-to-tip) — because *both* scale with how much wing you cover. Ranked
+by stall-per-cruise ratio at 40% span:
 
-| # | VG config | stall ↓ 40% | stall ↓ 100% | cruise ↓ 40% | cruise ↓ 100% | ratio |
-|---|---|---|---|---|---|---|
-| **1** | **6 mm delta, 70 mm** ★ | −1.0 kt | **−2.4 kt** | **−1.1 kt** | −2.8 kt | **2.1×** |
-| 2 | 8 mm parabolic, 50 mm | −1.6 kt | −3.7 kt | −2.1 kt | −5.2 kt | 1.7× |
-| 3 | 8 mm ogive, 50 mm | −1.5 kt | −3.7 kt | −2.1 kt | −5.2 kt | 1.7× |
-| 4 | 12 mm delta, 70 mm | −1.6 kt | −3.8 kt | −2.4 kt | −5.8 kt | 1.6× |
-| 5 | 8 mm delta, 50 mm | −1.2 kt | −2.9 kt | −1.9 kt | −4.7 kt | 1.5× |
-| 6 | 12 mm delta, 50 mm | −1.7 kt | −4.0 kt | −3.2 kt | −7.6 kt | 1.3× |
-| 7 | 6 mm delta, 50 mm | −0.6 kt | −1.6 kt | −1.5 kt | −3.6 kt | 1.1× |
-| 8 | 12 mm stol fin, 50 mm | −1.7 kt | −4.0 kt | −6.8 kt | −15.5 kt | 0.6× |
-| 9 | 12 mm rect, 50 mm (naive) | +0.6 kt* | +1.6 kt* | −9.7 kt | −21.7 kt | — |
+| # | VG config | stalls at | stall ↓ 40% | stall ↓ 100% | cruise ↓ 40% | cruise ↓ 100% | ratio |
+|---|---|---|---|---|---|---|---|
+| **1** | **6 mm delta, 70 mm** ★ | **~18°** | **−2.4 kt** | **−5.6 kt** | **−1.5 kt** | −3.6 kt | **1.6×** |
+| 2 | 12 mm delta, 70 mm | ~16° | −0.8 kt | −1.8 kt | −3.5 kt | −8.2 kt | 0.2× |
+| 3 | 8 mm parabolic, 50 mm | ~18° | −0.7 kt | −1.8 kt | −3.1 kt | −7.3 kt | 0.2× |
+| 4 | 8 mm delta, 50 mm | ~17° | −0.5 kt | −1.1 kt | −2.7 kt | −6.5 kt | 0.2× |
 
-*\*the naive flat-plate config **raises** stall speed (it loses lift) while
-costing ~10–22 kt of cruise — a textbook example of why the optimization
-mattered. †stall uses the section Clmax (conservative); the real stall-angle
-extension makes the gains somewhat larger. ‡"stalls at AoA" column being filled
-by the high-AoA polar — clean stalls ~16–17°; the top configs hold past 18°.*
+*Clean wing peaks at **Clmax 1.443 @ α ≈ 15°** then its lift collapses — it
+stalls ~15°. Every VG holds lift higher and later; the 6 mm delta reaches a
+genuine steady peak of **Clmax 1.709 at α 18°**, far above the field, which is
+why it wins stall outright. The bigger VGs' steady peaks land lower (~1.49–1.52)
+because their high-lift points fall where buffet has already risen. Why not the
+~15 kt some pilots quote? This LS(1)-0413 already has a high clean Clmax (~1.44),
+so there's less to recover — draggy STOL airfoils starting at ~1.2–1.4 gain more.
+**5.6 kt is the truthful number for this wing.***
 
 **How to read it — span coverage is a lever, not just a detail:**
-- **Want the safety (lower stall speed)?** Go *wide* — a 100% install roughly
-  **doubles** the stall reduction vs 40% (e.g. 6 mm delta: −1.0 → −2.4 kt),
-  because the inboard wing gets the benefit too.
+- **Want the safety (lower stall speed)?** Go *wide* — a 100% install gives
+  ~2.3× the stall reduction of 40% (6 mm delta: −2.4 → −5.6 kt), because the
+  inboard wing gets the benefit too.
 - **Want to protect cruise?** Go *narrow* — 40% costs about 40% of the cruise.
-- **#1 (6 mm delta @ 70 mm)** is the most *efficient* at any span (−2.4 kt
-  stall for −2.8 kt cruise even full-span). **#2–#4** give more raw stall margin
-  per the cruise paid. **The naive flat plate loses on both axes at any span.**
+- **#1 (6 mm delta @ 70 mm) is the clear winner** — the *only* config that nets
+  positive (stall gain > cruise cost) at 40% span, and it also has the lowest
+  cruise tax of the whole study. Stall data, cruise data, and steadiness all
+  agree on the same single part.
 
 ### 🔀 Mixed install — root-first stall + max aileron authority
 
-Your idea: a **cheap-cruise efficient vane inboard** (which can be spaced wide
-or left partly bare so the **root stalls first** → buffet warning + nose-drop)
-and a **high-lift vane on the outboard half over the ailerons** (so the ailerons
-stay attached and authoritative deepest into the stall). Estimated for **inboard
-50% = 6 mm delta @ 70 mm, outboard 50% = 8 mm parabolic @ 50 mm**:
+Your idea: seed a **root-first stall** for warning while keeping the ailerons
+attached longest. The peak-to-peak polar changed the answer here in a good way:
+**the 6 mm delta is both the cruise *and* the stall champion** (its Clmax 1.709
+beats the high-lift shapes' steady peaks), so the cleanest install is **one part
+everywhere**, varied only by *spacing*:
 
 | zone | VG | role |
 |---|---|---|
-| inboard (root → mid) | 6 mm delta, 70 mm (widen/bare at root) | stalls **first** (warning), cheap cruise |
-| outboard (mid → tip, ailerons) | 8 mm parabolic, 50 mm | **max aileron authority** (highest lift) |
+| **bare root** (innermost station) | *no VG* | stalls **first** → buffet warning (may replace the stall strip) |
+| inboard (root → mid) | 6 mm delta, pitch ramps **110 → 70 mm** | gradient → smooth root→mid stall sweep |
+| outboard (mid → tip, ailerons) | 6 mm delta, **70 mm** uniform | **max attachment + aileron authority** deepest into the stall |
 
-**Whole-airplane result (full-span mixed install):** stall speed **−3.1 kt**,
-cruise **−4.0 kt**. The stall drop (−3.1) beats the all-6 mm full-span build
-(−2.4) and nearly matches all-parabolic (−3.7), while the cruise cost (−4.0)
-sits between them (all-6 mm −2.8, all-parabolic −5.2). So the mix buys most of
-the parabolic's stall benefit at a middling cruise cost **plus** the two things
-a uniform build can't give: a root that **stalls first** (warning + nose-drop)
-and ailerons that **stay authoritative deepest into the stall**.
+**Why one part, not a two-shape mix:** since the 6 mm delta already wins lift
+*and* cruise, adding a draggier high-lift vane outboard would only **cost cruise
+without buying stall** — the bigger shapes' steady Clmax is actually *lower*.
+So the spacing gradient (wide→tight) does all the work: weaker (wider) VGs
+inboard let the root give up first, uniform tight VGs outboard hold the ailerons.
 
-That ~−4.0 kt cruise sits between the all-6 mm (−2.8 kt) and all-parabolic
-(−5.2 kt) full-span numbers — you pay a bit more than the pure-efficiency build,
-and in return you get the **best-of-both**: a root that stalls first for warning,
-ailerons that bite hardest when you need them, and a smooth root→tip stall
-progression. *(This is an estimate from the per-zone slice data; a true swept-
-wing 3D run would refine it — but the 2D pieces and the pitch-vs-stall curve
-strongly support it.)*
+*(The spanwise gradient is built by interpolating between the discrete pitch
+points the 2D slice measured — wider pitch demonstrably stalls earlier. The
+slice cannot directly simulate a continuous spanwise gradient; a true swept-wing
+3D run would refine the exact schedule, but the discrete pitch-vs-stall curve
+strongly supports it. Stated plainly so nobody mistakes it for a 3D result.)*
 
 ### The recommended part 🏆
 
 **A short delta (triangular-ramp) vane, 6 mm tall, 10° incidence, 70 mm
-spacing, counter-rotating pairs, front tips at 7% chord** — the #1 efficiency
-pick, used as **one part on all surfaces** (wing, plus elevator/rudder for
-control authority when slow), with **wider spacing or a bare patch at the wing
-root** so the root stalls first (natural buffet warning). It reattaches the
-stalled wing (drag −80%, L/D ~×5) for under ~1.6 kt of cruise. If you want the
-most stall-speed reduction instead, step up to the **8 mm parabolic** or
-**12 mm delta @ 70 mm** (#2–#4) — same install, a touch more part.
+spacing, counter-rotating pairs, front tips at 7% chord** — used as **one part
+on all surfaces** (wing, plus elevator/rudder for control authority when slow),
+with a **bare patch / wider spacing at the wing root** so the root stalls first
+(natural buffet warning, may replace the stall strip). It is the outright winner
+on **all four axes**: it pushes the stall from ~15° to ~18° for the biggest
+honest stall-speed cut (**−5.6 kt full-span / −2.4 kt at 40%**), costs the
+**lowest cruise drag of the entire study** (+6.2%, ~−1.5 kt at 40% span),
+reattaches the stalled wing (drag −80%, L/D ~×5), and runs the *steadiest*
+through the buffet. No step-up needed — the bigger shapes cost more cruise for
+*less* peak lift. One small, cheap, printable part does everything.
 
 ### The five things that decided it
 
