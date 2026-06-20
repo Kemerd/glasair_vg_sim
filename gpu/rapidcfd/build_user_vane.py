@@ -47,7 +47,25 @@ from geometry.stl_gen import extrude_section
 from geometry.airfoil import load_airfoil, resample_airfoil
 from geometry.units import load_aircraft
 
-USER_STL = ASSETS / "user_vanes" / "6mm_deltavg_v3.stl"
+# Which user vane to test. v3 = arrowhead WITH fillets (lost the stall peak);
+# v4 = same footprint but ZERO fillets, every edge crisp (the retest). Selected
+# via --version on the CLI; both share the exact same placement so it's a clean
+# A/B against each other AND against the parametric champion vg06d70b10.
+# All flange-fillet variants share the SAME fin footprint (18x12x6) and the SAME
+# tall-sharp-edge-at-x0 orientation, so the one remap below handles them all.
+#   v3      = filleted everywhere (lost the stall peak)
+#   v4      = zero fillets, fully crisp
+#   v4fs    = fillet the FLANGE SIDES only (delta fin left sharp)
+#   v4fsb   = fillet the flange SIDES + BACK (delta fin still left sharp)
+# v4fs/v4fsb isolate the question: can we soften the FLANGE edges for cruise
+# WITHOUT touching the vortex-shedding delta edges that set the stall?
+VANE_STL = {
+    "v3": ASSETS / "user_vanes" / "6mm_deltavg_v3.stl",
+    "v4": ASSETS / "user_vanes" / "6mm_deltavg_v4_nofilet.stl",
+    "v4fs": ASSETS / "user_vanes" / "6mm_deltavg_v4_filetsidesonly.stl",
+    "v4fsb": ASSETS / "user_vanes" / "6mm_deltavg_v4_filetside_and_back.stl",
+}
+USER_STL = VANE_STL["v4"]      # default; main() overrides from --version
 
 # Match the champion config exactly so this is a clean A/B vs vg06d70b10.
 X_FRAC = 0.07          # tips at 7% chord
@@ -146,6 +164,18 @@ def build_user_article(name, alpha_deg, ac, coords, slab):
 
 
 def main():
+    import argparse
+    global USER_STL
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--version", choices=["v3", "v4", "v4fs", "v4fsb"],
+                    default="v4",
+                    help="which user vane STL to build "
+                         "(v3=filleted, v4=crisp, v4fs=flange-sides-filleted, "
+                         "v4fsb=flange-sides+back-filleted)")
+    opts = ap.parse_args()
+    USER_STL = VANE_STL[opts.version]            # point the loader at the choice
+    ver = opts.version
+
     ac = load_aircraft(REPO / "aircraft.yaml")
     chord = ac.wing.aileron.chord_at_mid_station
     coords = resample_airfoil(load_airfoil(REPO / "geometry" / "ls413.dat"),
@@ -155,12 +185,12 @@ def main():
 
     names = []
     for a in ALPHAS:
-        tag = f"uvg06v3_a{int(a):02d}"
+        tag = f"uvg06{ver}_a{int(a):02d}"
         names.append(tag)
         re_eff = RE
         u_inf = re_eff * NU / chord
         print(f"[build] {tag}: alpha={a:g}deg Re={re_eff:.2g} U={u_inf:.2f} m/s "
-              f"pitch={PITCH_MM:.0f}mm  (USER arrowhead vane)")
+              f"pitch={PITCH_MM:.0f}mm  (USER vane {ver}, STL={USER_STL.name})")
         wall, vanes = build_user_article(tag, a, ac, coords, slab)
         write_case(tag, wall, vanes, u_inf, chord, slab, n_iter=4000)
 
