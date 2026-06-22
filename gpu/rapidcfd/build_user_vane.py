@@ -112,11 +112,19 @@ def load_user_vane_local():
     return m
 
 
-def build_user_article(name, alpha_deg, ac, coords, slab):
-    """Stamp the user vane (counter-rotating pair) on the wing at 7%c, bake alpha."""
+def build_user_article(name, alpha_deg, ac, coords, slab,
+                       pitch_m, beta_deg, toe="out"):
+    """Stamp the user vane (counter-rotating pair) on the wing at 7%c, bake alpha.
+
+    pitch_m  : pair spacing in METERS (also == slab width for the periodic cell).
+    beta_deg : vane incidence to local flow, degrees.
+    toe      : "out" splays the leading edges apart (study default), "in"
+               converges them. Flips the yaw sense of the pair.
+    """
     chord = ac.wing.aileron.chord_at_mid_station
-    pitch = PITCH_MM / 1000.0
-    beta = math.radians(BETA_DEG)
+    pitch = pitch_m
+    beta = math.radians(beta_deg)
+    toe_sign = -1.0 if toe == "in" else +1.0          # "in" converges the pair
     stl_span = SPAN_OVERHANG * slab
 
     # Clean wing solid (same M0 toolkit as every other case).
@@ -128,14 +136,14 @@ def build_user_article(name, alpha_deg, ac, coords, slab):
 
     base_vane = load_user_vane_local()
 
-    # Counter-rotating pair, +/- pitch/4 in z, yawed +/-beta (toe-out), then the
-    # base rotated to the local skin slope and dropped onto the surface -- the
-    # IDENTICAL placement transform build_article uses for the parametric vanes.
+    # Counter-rotating pair, +/- pitch/4 in z, yawed +/-beta (toe per `toe`),
+    # then base rotated to the local skin slope + dropped onto the surface --
+    # the IDENTICAL placement transform build_article uses for parametric vanes.
     vanes = []
     for sgn, z_off in ((+1.0, +pitch / 4.0), (-1.0, -pitch / 4.0)):
         v = base_vane.copy()
         v.apply_transform(trimesh.transformations.rotation_matrix(
-            sgn * beta, (0.0, 1.0, 0.0)))           # toe-out yaw about vertical
+            toe_sign * sgn * beta, (0.0, 1.0, 0.0)))  # toe-out/in yaw, vertical
         v.apply_transform(trimesh.transformations.rotation_matrix(
             slope, (0.0, 0.0, 1.0)))                # match local skin slope
         # seat slightly INTO the skin so the boolean union is clean (flange + a
@@ -169,29 +177,43 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", choices=["v3", "v4", "v4fs", "v4fsb"],
                     default="v4",
-                    help="which user vane STL to build "
-                         "(v3=filleted, v4=crisp, v4fs=flange-sides-filleted, "
-                         "v4fsb=flange-sides+back-filleted)")
+                    help="which user vane STL (v3=fillet-all, v4=crisp, "
+                         "v4fs=flange-sides, v4fsb=flange-sides+back)")
+    ap.add_argument("--pitch", type=float, default=PITCH_MM,
+                    help="pair spacing in mm (default 70)")
+    ap.add_argument("--beta", type=float, default=BETA_DEG,
+                    help="vane incidence in deg (default 10)")
+    ap.add_argument("--toe", choices=["out", "in"], default="out",
+                    help="counter-rotating sense (default out)")
+    ap.add_argument("--alphas", type=float, nargs="+", default=ALPHAS,
+                    help="angles of attack to build (default 2 15 18 20)")
+    ap.add_argument("--tag", default=None,
+                    help="case-name stem; default auto from version+pitch+beta+toe")
     opts = ap.parse_args()
     USER_STL = VANE_STL[opts.version]            # point the loader at the choice
     ver = opts.version
+    pitch = opts.pitch / 1000.0
+    slab = pitch                                  # paired layout = one pitch wide
+
+    # Auto tag encodes the swept knobs so gambit cases never collide, e.g.
+    # uvg06v3_p100_b10_to  (v3, 100mm, beta10, toe-out).
+    stem = opts.tag or (f"uvg06{ver}_p{int(opts.pitch):03d}_b{int(opts.beta):02d}"
+                        f"_t{opts.toe[0]}")
 
     ac = load_aircraft(REPO / "aircraft.yaml")
     chord = ac.wing.aileron.chord_at_mid_station
     coords = resample_airfoil(load_airfoil(REPO / "geometry" / "ls413.dat"),
                               n_points=241, te="blunt")
-    pitch = PITCH_MM / 1000.0
-    slab = pitch                                    # paired layout = one pitch
 
     names = []
-    for a in ALPHAS:
-        tag = f"uvg06{ver}_a{int(a):02d}"
+    for a in opts.alphas:
+        tag = f"{stem}_a{int(a):02d}"
         names.append(tag)
-        re_eff = RE
-        u_inf = re_eff * NU / chord
-        print(f"[build] {tag}: alpha={a:g}deg Re={re_eff:.2g} U={u_inf:.2f} m/s "
-              f"pitch={PITCH_MM:.0f}mm  (USER vane {ver}, STL={USER_STL.name})")
-        wall, vanes = build_user_article(tag, a, ac, coords, slab)
+        u_inf = RE * NU / chord
+        print(f"[build] {tag}: alpha={a:g} pitch={opts.pitch:g}mm beta={opts.beta:g} "
+              f"toe={opts.toe} (STL={USER_STL.name})")
+        wall, vanes = build_user_article(tag, a, ac, coords, slab,
+                                         pitch, opts.beta, opts.toe)
         write_case(tag, wall, vanes, u_inf, chord, slab, n_iter=4000)
 
     # Refresh the runner so WSL can launch these names.

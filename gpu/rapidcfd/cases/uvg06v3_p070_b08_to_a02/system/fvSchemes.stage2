@@ -1,0 +1,57 @@
+/*--------------------------------*- C++ -*----------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      fvSchemes;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+ddtSchemes
+{
+    default         steadyState;
+}
+
+// RapidCFD's GPU port registers a reduced scheme menu: grad is Gauss-only
+// (no cellLimited/leastSquares), and linearUpwind is absent - limitedLinear
+// (TVD) is the second-order convection workhorse that survived the port.
+gradSchemes
+{
+    default         Gauss linear;
+}
+
+divSchemes
+{
+    default         none;
+    // Two-stage convection: the runner solves first on dissipative upwind
+    // to kill the impulsive-start global oscillation, then restarts on the
+    // TVD scheme for the reported numbers (this file is the stage marker).
+    div(phi,U)      bounded Gauss limitedLinearV 1;
+    div(phi,k)      bounded Gauss limitedLinear 1;
+    div(phi,omega)  bounded Gauss limitedLinear 1;
+    div((nuEff*dev(T(grad(U))))) Gauss linear;
+}
+
+laplacianSchemes
+{
+    default         Gauss linear limited 0.33;
+}
+
+interpolationSchemes
+{
+    default         linear;
+}
+
+snGradSchemes
+{
+    default         limited 0.33;
+}
+
+fluxRequired
+{
+    default         no;
+    p;
+}
