@@ -1,0 +1,73 @@
+/*--------------------------------*- C++ -*----------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      fvSolution;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+
+solvers
+{
+    // GPU pressure solve: Krylov + AINV is RapidCFD's massively-parallel
+    // sweet spot (DIC-style preconditioners serialize on GPU). With the
+    // SP build, the fp64-emulated reductions keep the CG recurrences
+    // honest; tolerances sized for fp32 fields.
+    p
+    {
+        solver          PCG;
+        preconditioner  AINV;
+        tolerance       1e-7;
+        relTol          0.01;
+        maxIter         1000;
+    }
+
+    "(U|k|omega)"
+    {
+        solver          PBiCGStab;
+        preconditioner  AINV;
+        tolerance       1e-7;
+        relTol          0.1;
+    }
+}
+
+SIMPLE
+{
+    nNonOrthogonalCorrectors 1;
+    pRefCell        0;
+    pRefValue       0;
+
+    residualControl
+    {
+        p               1e-5;
+        U               1e-6;
+        "(k|omega)"     1e-6;
+    }
+}
+
+// potentialFoam pre-pass settings (initializes U/phi so SIMPLE starts from
+// an attached-flow guess instead of the impulsive uniform field whose
+// startup vortex was observed to pump a domain-scale Cl limit cycle).
+potentialFlow
+{
+    nNonOrthogonalCorrectors 10;
+}
+
+relaxationFactors
+{
+    // Deliberately heavy damping: the slip-walled slice channel reflects
+    // everything, so transients must be killed by relaxation alone.
+    fields
+    {
+        p               0.2;
+    }
+    equations
+    {
+        U               0.5;
+        k               0.4;
+        omega           0.4;
+    }
+}
